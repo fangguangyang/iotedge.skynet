@@ -1,0 +1,48 @@
+local skynet = require "skynet.manager"
+local api = require "api"
+
+local running = true
+local host = "iotedge-host"
+local post
+
+local cmd_desc = {
+    host_status = "Show host status"
+}
+
+local function reg_cmd()
+    for k, v in pairs(cmd_desc) do
+        api.reg_cmd(k, v)
+    end
+end
+
+local function fetch_cpu()
+    if running then
+        post(host, {["CPU Usage"] = math.random(10000)})
+        skynet.timeout(100, fetch_cpu)
+    end
+end
+
+local function fetch_mem()
+    if running then
+        post(host, {["Memory Usage"] = math.random(10000)})
+        skynet.timeout(100, fetch_mem)
+    end
+end
+
+function host_status(dev)
+    return dev.." is running"
+end
+
+function on_conf()
+    reg_cmd()
+    post = api.batch_post(10)
+    skynet.timeout(600, fetch_cpu)
+    skynet.timeout(600, fetch_mem)
+    skynet.timeout(500, function()
+        api.reg_dev(host, "iotedge host")
+    end)
+end
+
+function on_exit()
+    running = false
+end

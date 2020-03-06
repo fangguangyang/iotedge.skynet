@@ -1,0 +1,28 @@
+root = "./"
+
+logger = "logger"
+logservice = "snlua"
+logpath = root.."logs-prod"
+loglevel = "ERROR"
+
+cfg = root.."config.lua"
+
+harbor = 0
+start = "cfgmgr"
+bootstrap = "snlua bootstrap"
+lualoader = root.."skynet/lualib/loader.luac"
+
+lua_path = root.."lualib/?.luac;"..
+           root.."lualib/?/init.luac;"..
+           root.."skynet/lualib/?.luac;"..
+           root.."skynet/lualib/?/init.luac;"..
+           root.."app/?/entry.luac"
+
+luaservice = root.."service/?.luac;"..
+             root.."skynet/service/?.luac"
+
+lua_cpath = root.."bin/?.so"
+cpath = root.."bin/?.so"
+
+thread = 3
+dp_memlimit = 200*1024*1024
