@@ -1,29 +1,45 @@
-local skynet = require "skynet.manager"
+local skynet = require "skynet"
 local core = require "skynet.core"
 local api = require "api"
 local regex = require("text").regex
-local sys = require "sys"
 local log = require "log"
-local text = require("text").dp
+local text = require("text").appmgr
 
 local interval = 500 -- 5 seconds
 local limit = 4 -- 15 seconds
-
 local locked = true
-local mqttdpid = sys.mqttdpid
-local wsdpid = sys.wsdpid
+
+local sysmgr_addr, gateway_addr, wsapp, mqttapp = ...
+local wsappid = nil
+local mqttappid = nil
 
 local sysinfo = {
     apps = {},
     pipes = {}
 }
-local dplist = sysinfo.apps
+local applist = sysinfo.apps
 local pipelist = sysinfo.pipes
 local tpllist = {}
 
 local installlist = {}
-local dpmonitor = {}
-local dproute = {}
+local appmonitor = {}
+local approute = {}
+
+local function conf_get(k)
+    return skynet.call(sysmgr_addr, "lua", "get", k)
+end
+local function conf_set(k, v)
+    return skynet.call(sysmgr_addr, "lua", "set", k, v)
+end
+local function install_tpl(tpl)
+    return skynet.call(sysmgr_addr, "lua", "install_tpl", tpl)
+end
+local function upgrade(version)
+    return skynet.call(sysmgr_addr, "lua", "upgrade", version)
+end
+local function set_repo(uri, auth)
+    return skynet.call(sysmgr_addr, "lua", "set_repo", uri, auth)
+end
 
 local function clone(tpl, custom)
     local copy
@@ -46,15 +62,15 @@ local function clone(tpl, custom)
     return copy
 end
 
-local function save_dplist()
+local function save_applist()
     local list = {}
-    for k, v in pairs(dplist) do
-        if k ~= mqttdpid and k ~= wsdpid then
+    for k, v in pairs(applist) do
+        if k ~= mqttappid and k ~= wsappid then
             list[k] = {}
             list[k][v.app] = v.conf
         end
     end
-    sys.conf_set("dp_list", list)
+    conf_set("app_list", list)
 end
 
 local function save_pipelist()
@@ -62,12 +78,12 @@ local function save_pipelist()
     for k, v in pairs(pipelist) do
         list[k] = {}
         list[k].auto = (v.start_time ~= false)
-        list[k].dps = v.dps
+        list[k].apps = v.apps
     end
-    sys.conf_set("pipe_list", list)
+    conf_set("pipe_list", list)
 end
 
-local function load_dp(id, tpl, conf)
+local function load_app(id, tpl, conf)
     if not tpllist[tpl] then
         if type(tpl) ~= "string" or
             not tpl:match(regex.tpl_full_name) then
@@ -76,14 +92,12 @@ local function load_dp(id, tpl, conf)
         if installlist[tpl] then
             return false, text.dup_tpl_install
         end
-        local uri = sysinfo.sys.repo.uri
-        local auth = sysinfo.sys.repo.auth
-        if not uri or not auth then
+        if not sysinfo.sys.repo then
             return false, text.invalid_repo
         end
 
         installlist[tpl] = true
-        local ok, ret = sys.install_tpl(tpl)
+        local ok, ret = install_tpl(tpl)
         installlist[tpl] = false
         if ok then
             tpllist[tpl] = ret
@@ -93,10 +107,10 @@ local function load_dp(id, tpl, conf)
     end
 
     -- Borrow to reserve id
-    dproute[id] = {}
-    local ok, addr = pcall(skynet.newservice, "dpcell", tpl, id)
+    approute[id] = {}
+    local ok, addr = pcall(skynet.newservice, "appcell", tpl, id, gateway_addr, mqttapp)
     if not ok then
-        dproute[id] = nil
+        approute[id] = nil
         log.error(text.load_fail, id, tpl, addr)
         return false, text.load_fail
     end
@@ -104,13 +118,13 @@ local function load_dp(id, tpl, conf)
     local full_conf = clone(tpllist[tpl], conf)
     skynet.send(addr, "lua", "conf", full_conf)
 
-    dplist[id] = {
+    applist[id] = {
         addr = addr,
         load_time = api.datetime(),
         app = tpl,
         conf = conf
     }
-    dpmonitor[addr] = {
+    appmonitor[addr] = {
         id = id,
         counter = 0
     }
@@ -119,11 +133,11 @@ local function load_dp(id, tpl, conf)
 end
 
 local function start_pipe(id)
-    local dps = pipelist[id].dps
-    for _, dpid in pairs(dps) do
-        local r = dproute[dpid][id]
+    local apps = pipelist[id].apps
+    for _, appid in pairs(apps) do
+        local r = approute[appid][id]
         if r.target then
-            skynet.send(dplist[dpid].addr, "lua", "route_add", r.source, r.target)
+            skynet.send(applist[appid].addr, "lua", "route_add", r.source, r.target)
         end
     end
     pipelist[id].start_time = api.datetime()
@@ -132,11 +146,11 @@ local function start_pipe(id)
 end
 
 local function stop_pipe(id)
-    local dps = pipelist[id].dps
-    for _, dpid in pairs(dps) do
-        local r = dproute[dpid][id]
+    local apps = pipelist[id].apps
+    for _, appid in pairs(apps) do
+        local r = approute[appid][id]
         if r.target then
-            skynet.send(dplist[dpid].addr, "lua", "route_del", r.source, r.target)
+            skynet.send(applist[appid].addr, "lua", "route_del", r.source, r.target)
         end
     end
     pipelist[id].start_time = false
@@ -144,23 +158,23 @@ local function stop_pipe(id)
     log.error(text.pipe_stop_suc, id)
 end
 
-local function load_pipe(id, dps)
-    for _, dpid in pairs(dps) do
-        if not dplist[dpid] then
-            return false, text.unknown_dp
+local function load_pipe(id, apps)
+    for _, appid in pairs(apps) do
+        if not applist[appid] then
+            return false, text.unknown_app
         end
     end
 
-    local source = dps[1]
-    for i, dpid in ipairs(dps) do
-        local nextid = dps[i+1]
+    local source = apps[1]
+    for i, appid in ipairs(apps) do
+        local nextid = apps[i+1]
         if nextid then
-            dproute[dpid][id] = {
+            approute[appid][id] = {
                 source = source,
-                target = dplist[nextid].addr
+                target = applist[nextid].addr
             }
         else
-            dproute[dpid][id] = {
+            approute[appid][id] = {
                 source = source
             }
         end
@@ -169,45 +183,45 @@ local function load_pipe(id, dps)
     pipelist[id] = {
         start_time = false,
         stop_time = api.datetime(),
-        dps = dps,
+        apps = apps,
     }
     log.error(text.pipe_load_suc, id)
     return true
 end
 
-local function load_sysdp()
-    if mqttdpid then
-        dproute[mqttdpid] = {}
-        dplist[mqttdpid] = {
-            addr = sys.gateway_mqtt_addr
+local function load_sysapp()
+    local id = 1
+    if tonumber(wsapp) ~= -1 then
+        wsappid = id
+        approute[id] = {}
+        applist[id] = {
+            addr = wsapp
+        }
+        id = id + 1
+    end
+    if tonumber(mqttapp) ~= -1 then
+        mqttappid = id
+        approute[id] = {}
+        applist[id] = {
+            addr = mqttapp
         }
     end
 end
 
-local function load_wsdp()
-    if wsdpid then
-        dproute[wsdpid] = {}
-        dplist[wsdpid] = {
-            addr = sys.gateway_ws_addr
-        }
-    end
-end
-
-local function load_dps()
-    load_sysdp()
-    load_wsdp()
-    local dps = sys.conf_get("dp_list")
-    for id, dp in pairs(dps) do
-        for tpl, conf in pairs(dp) do
-            load_dp(id, tpl, conf)
+local function load_apps()
+    load_sysapp()
+    local apps = conf_get("app_list")
+    for id, app in pairs(apps) do
+        for tpl, conf in pairs(app) do
+            load_app(id, tpl, conf)
         end
     end
 end
 
 local function load_pipes()
-    local pipes = sys.conf_get("pipe_list")
+    local pipes = conf_get("pipe_list")
     for id, pipe in pairs(pipes) do
-        local ok, _ = load_pipe(id, pipe.dps)
+        local ok, _ = load_pipe(id, pipe.apps)
         if ok and pipe.auto then
             start_pipe(id)
         end
@@ -215,8 +229,7 @@ local function load_pipes()
 end
 
 local cmd_desc = {
-    sysdp = true,
-    clean = true,
+    mqttapp = true,
     set_repo = "Set SW repository: {uri=<string>,auth=<string>}",
     configure = "System configure: {}",
     upgrade = "System upgrade: <string>",
@@ -237,12 +250,13 @@ local function reg_cmd()
 end
 
 local function load_all()
-    sysinfo.sys = sys.conf_get("sys")
+    sysinfo.sys = conf_get("sys")
     sysinfo.sys.up = api.datetime(skynet.starttime())
-    sysinfo.sys.repo = sys.conf_get("repo")
-    tpllist = sys.conf_get("tpl_list")
-    load_dps()
+    sysinfo.sys.repo = conf_get("repo")
+    tpllist = conf_get("tpl_list")
+    load_apps()
     load_pipes()
+    api.init(gateway_addr, mqttapp)
     api.reg_dev("sys", true)
     reg_cmd()
     locked = false
@@ -273,13 +287,11 @@ function command.upgrade(version)
     if version == sysinfo.sys.version then
         return false, text.dup_upgrade_version
     end
-    local uri = sysinfo.sys.repo.uri
-    local auth = sysinfo.sys.repo.auth
-    if not uri or not auth then
+    if not sysinfo.sys.repo then
         return false, text.invalid_repo
     end
     locked = true
-    local ok, ret = sys.upgrade(version)
+    local ok, ret = upgrade(version)
     --locked = false
     return ok, ret
 end
@@ -293,20 +305,20 @@ function command.set_repo(arg)
         type(arg.auth) ~= "string" then
         return false, text.invalid_arg
     end
-    local ok, ret = sys.set_repo(arg.uri, arg.auth)
+    local ok, ret = set_repo(arg.uri, arg.auth)
     if ok then
-        sysinfo.sys.repo = ret
+        sysinfo.sys.repo = arg.uri
         return true
     else
         return false, ret
     end
 end
 
-function command.sysdp(info)
-    local sysdp = dplist[mqttdpid]
-    sysdp.load_time = api.datetime()
-    sysdp.conf = info.conf
-    sysdp.app = info.app
+function command.mqttapp(info)
+    local m = applist[mqttappid]
+    m.load_time = api.datetime()
+    m.conf = info.conf
+    m.app = info.app
     return true
 end
 
@@ -328,10 +340,10 @@ function command.app_new(arg)
     else
         conf = {}
     end
-    local id = #dproute + 1
-    local ok, ret = load_dp(id, arg.app, conf)
+    local id = #approute + 1
+    local ok, ret = load_app(id, arg.app, conf)
     if ok then
-        save_dplist()
+        save_applist()
         return true, id
     else
         return false, ret
@@ -346,33 +358,33 @@ function command.app_remove(idstr)
         return false, text.invalid_arg
     end
     local id = tonumber(idstr)
-    local dp = dplist[id]
-    if not dp then
-        return false, text.unknown_dp
+    local app = applist[id]
+    if not app then
+        return false, text.unknown_app
     end
-    if id == mqttdpid or id = wsdpid then
-        return false, text.sysdp_remove
+    if id == mqttappid or id == wsappid then
+        return false, text.sysapp_remove
     end
-    if next(dproute[id]) ~= nil then
-        return false, text.dp_in_use
+    if next(approute[id]) ~= nil then
+        return false, text.app_in_use
     end
 
-    skynet.send(dp.addr, "lua", "exit")
-    dplist[id] = nil
-    dproute[id] = nil
-    save_dplist()
+    skynet.send(app.addr, "lua", "exit")
+    applist[id] = nil
+    approute[id] = nil
+    save_applist()
     return true
 end
 
-function command.pipe_new(dps)
+function command.pipe_new(apps)
     if locked then
         return false, text.locked
     end
-    if type(dps) ~= "table" or #dps <= 1 then
+    if type(apps) ~= "table" or #apps <= 1 then
         return false, text.invalid_arg
     end
     local id = #pipelist + 1
-    local ok, ret = load_pipe(id, dps)
+    local ok, ret = load_pipe(id, apps)
     if ok then
         save_pipelist()
         return true, id
@@ -397,8 +409,8 @@ function command.pipe_remove(idstr)
         return false, text.pipe_running
     end
 
-    for _, dpid in ipairs(pipelist[id].dps) do
-        dproute[dpid][id] = nil
+    for _, appid in ipairs(pipelist[id].apps) do
+        approute[appid][id] = nil
     end
     pipelist[id] = nil
     save_pipelist()
@@ -469,20 +481,20 @@ local function signal(addr)
 end
 
 local function check()
-    for addr, dp in pairs(dpmonitor) do
-        if dp.counter == 0 then
-            dp.counter = 1
+    for addr, app in pairs(appmonitor) do
+        if app.counter == 0 then
+            app.counter = 1
             skynet.fork(function()
                 skynet.call(addr, "debug", "PING")
-                if dpmonitor[addr] then
-                    dpmonitor[addr].counter = 0
+                if appmonitor[addr] then
+                    appmonitor[addr].counter = 0
                 end
             end)
-        elseif dp.counter == limit then
-            log.error(text.loop, dp.id)
+        elseif app.counter == limit then
+            log.error(text.loop, app.id)
             signal(addr)
         else
-            dp.counter = dp.counter + 1
+            app.counter = app.counter + 1
         end
     end
     skynet.timeout(interval, check)
@@ -494,9 +506,9 @@ local function init()
         id = skynet.PTYPE_CLIENT,
         unpack = function() end,
         dispatch = function(_, addr)
-            if dpmonitor[addr] then
-                log.error(text.dp_exit, dpmonitor[addr].id)
-                dpmonitor[addr] = nil
+            if appmonitor[addr] then
+                log.error(text.app_exit, appmonitor[addr].id)
+                appmonitor[addr] = nil
             end
         end
     }

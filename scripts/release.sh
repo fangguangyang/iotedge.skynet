@@ -5,7 +5,7 @@ RELEASE_DIR=release
 mkdir -p ${RELEASE_DIR}
 LUAC=skynet/3rd/lua/luac
 
-TYPE=$1
+PLAT=$1
 REPO=$2
 
 upload() {
@@ -21,33 +21,33 @@ upload() {
 
 compile() {
     for DIR in $@; do
-        for F in ${DIR}/*; do
-            if [ -d ${F} ]; then
-                compile ${F}
+        for FD in ${DIR}/*; do
+            if [ -d ${FD} ]; then
+                compile ${FD}
             else
-                if [ ${F##*.} = "lua" ]; then
-                    ${LUAC} -o ${F%.lua}.luac ${F}
+                if [ ${FD##*.} = "lua" ]; then
+                    ${LUAC} -o ${FD%.lua}.luac ${FD}
                 fi
             fi
         done
     done
 }
 
-if [ -n "${TYPE}" ]; then
-    REV=$(git rev-parse HEAD | cut -c1-5)
-    if [ ${TYPE} = "arm_v7" ] || [ ${TYPE} = "x86_64" ]; then
-        BUILD_PATH=build/${TYPE}
-        REVFILE=VERSION
-        echo ${REV} > ${REVFILE}
+if [ -n "${PLAT}" ]; then
+    if [ ${PLAT} = "arm_v7" ] || [ ${PLAT} = "x86_64" ]; then
+        REV=$(git rev-parse HEAD | cut -c1-5)
+        INFO=PLATFORM
+        echo -n ${REV}-${PLAT} > ${INFO}
 
         LUADIRS="lualib skynet/lualib service skynet/service"
         compile ${LUADIRS}
 
-        TARBALL=${RELEASE_DIR}/${REV}-${TYPE}.tar.gz
-        DIRS="${REVFILE} ${BUILD_PATH} config.*.lua scripts"
-        EXCLUDES="--exclude=${BUILD_PATH}/cservice/gate.so \
-                  --exclude=${BUILD_PATH}/luaclib/sproto.so \
-                  --exclude=${BUILD_PATH}/luaclib/client.so \
+        BUILD_PATH=bin
+        TARBALL=${RELEASE_DIR}/${REV}-${PLAT}.tar.gz
+        DIRS="${INFO} ${BUILD_PATH} config.*.lua scripts skynet.config*"
+        EXCLUDES="--exclude=${BUILD_PATH}/gate.so \
+                  --exclude=${BUILD_PATH}/sproto.so \
+                  --exclude=${BUILD_PATH}/client.so \
                   --exclude=${BUILD_PATH}/prebuilt/lib* \
                   --exclude=lualib/*.lua \
                   --exclude=skynet/lualib/*.lua \
@@ -56,16 +56,16 @@ if [ -n "${TYPE}" ]; then
 
         tar --transform "s|^|iotedge-${REV}/|" ${EXCLUDES} -czf ${TARBALL} ${DIRS} ${LUADIRS}
         find . -name "*.luac" |xargs rm -f
-        rm -f ${REVFILE}
+        rm -f ${INFO}
 
         echo "${TARBALL} created"
         upload iotedge ${TARBALL}
 
-        for APP in tpl/*; do
+        for APP in app/*; do
             compile ${APP}
 
             BASE=$(basename ${APP})
-            TARBALL=${RELEASE_DIR}/v_${BASE#*_v_}-${TYPE}.tar.gz
+            TARBALL=${RELEASE_DIR}/v_${BASE#*_v_}-${PLAT}.tar.gz
             EXCLUDES="--exclude=*.lua"
             tar --transform "s|^${APP}|${BASE}-${REV}|" ${EXCLUDES} -czf ${TARBALL} ${APP}
             find . -name "*.luac" |xargs rm -f

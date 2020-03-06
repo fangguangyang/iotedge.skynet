@@ -1,5 +1,4 @@
 local skynet = require "skynet"
-local sys = require "sys"
 
 local function call(addr, ...)
     return skynet.call(addr, "lua", ...)
@@ -10,6 +9,15 @@ local function send(addr, ...)
 end
 
 local api = {}
+
+local gateway_addr = nil
+local gateway_mqtt_addr = nil
+function api.init(gateway, mqtt)
+    gateway_addr = gateway
+    if tonumber(mqtt) ~= -1 then
+        gateway_mqtt_addr = mqtt
+    end
+end
 
 function api.datetime(time)
     if time then
@@ -23,21 +31,21 @@ function api.reg_cmd(name, desc, internal)
     if not internal and type(_ENV[name]) ~= "function" then
         return
     end
-    send(sys.gateway_addr, "reg_cmd", name, desc)
+    send(gateway_addr, "reg_cmd", name, desc)
 end
 
-local dpname
+local appname
 local devlist = {}
-local function dev_name(name, dpname)
-    return name.."@"..dpname
+local function dev_name(name, appname)
+    return name.."@"..appname
 end
 
 function api.reg_dev(name, desc)
     if desc == true then
-        dpname = name
-        send(sys.gateway_addr, "reg_dev", name, desc)
+        appname = name
+        send(gateway_addr, "reg_dev", name, desc)
     else
-        if dpname and
+        if appname and
             type(name) == "string" and
             type(desc) == "string" and
             not devlist[name] then
@@ -45,36 +53,42 @@ function api.reg_dev(name, desc)
                 buffer = {},
                 cov = {}
             }
-            local dev = dev_name(name, dpname)
-            send(sys.gateway_addr, "reg_dev", dev, desc)
-            send(sys.gateway_mqtt_addr, "post", "online", dev)
+            local dev = dev_name(name, appname)
+            send(gateway_addr, "reg_dev", dev, desc)
+            if gateway_mqtt_addr then
+                send(gateway_mqtt_addr, "post", "online", dev)
+            end
         end
     end
 end
 
 function api.unreg_dev(name)
     if name == true then
-        send(sys.gateway_addr, "unreg_dev", name)
+        send(gateway_addr, "unreg_dev", name)
         local dev
-        for n, _ in pairs(devlist) do
-            dev = dev_name(n, dpname)
-            send(sys.gateway_mqtt_addr, "post", "offline", dev)
+        if gateway_mqtt_addr then
+            for n, _ in pairs(devlist) do
+                dev = dev_name(n, appname)
+                send(gateway_mqtt_addr, "post", "offline", dev)
+            end
         end
-        dpname = nil
+        appname = nil
         devlist = {}
     else
-        if dpname and devlist[name] then
+        if appname and devlist[name] then
             devlist[name] = nil
-            local dev = dev_name(name, dpname)
-            send(sys.gateway_addr, "unreg_dev", dev)
-            send(sys.gateway_mqtt_addr, "post", "offline", dev)
+            local dev = dev_name(name, appname)
+            send(gateway_addr, "unreg_dev", dev)
+            if gateway_mqtt_addr then
+                send(gateway_mqtt_addr, "post", "offline", dev)
+            end
         end
     end
 end
 
 function api.post_attr(dev, attr)
-    if dpname and devlist[dev] then
-        send(sys.gateway_mqtt_addr, "post", "attributes", dev_name(dev, dpname), attr)
+    if appname and devlist[dev] and gateway_mqtt_addr then
+        send(gateway_mqtt_addr, "post", "attributes", dev_name(dev, appname), attr)
     end
 end
 
@@ -97,7 +111,7 @@ function api.data_value(data)
 end
 
 local function raw_post(dev, data)
-    local d = dev_name(dev, dpname)
+    local d = dev_name(dev, appname)
     for _, targets in pairs(r_table) do
         for t, _ in pairs(targets) do
             send(t, "data", d, data)
@@ -109,7 +123,7 @@ local function do_post(dev, data)
     raw_post(dev, p)
 end
 function api.post_data(dev, data)
-    if dpname and devlist[dev] and
+    if appname and devlist[dev] and
         type(data) == "table" and next(data) then
         do_post(dev, data)
     end
@@ -134,7 +148,7 @@ local function filter_cov(dev, data)
     return data
 end
 function api.cov_post(dev, data)
-    if dpname and devlist[dev] and
+    if appname and devlist[dev] and
         type(data) == "table" and next(data) then
         data = filter_cov(dev, data)
         if next(data) then
@@ -146,7 +160,7 @@ end
 function api.batch_post(size)
     if type(size) == "number" and size <= 200 then
         return function(dev, data)
-            if dpname and devlist[dev] and
+            if appname and devlist[dev] and
                 type(data) == "table" and next(data) then
                 local p = api.pack_data(data)
                 local b = devlist[dev].buffer

@@ -1,9 +1,10 @@
-local skynet = require "skynet.manager"
-local sys = require "sys"
+local skynet = require "skynet"
 local log = require "log"
 local seri = require "seri"
 local mqtt = require "mqtt"
 local text = require("text").mqtt
+
+local sysmgr_addr, gateway_addr = ...
 
 local client
 local running = true
@@ -17,7 +18,7 @@ local sys_uri = ""
 local sys_name = ""
 local sys_app = ""
 local log_prefix = ""
-local cocurrency = 5
+local cocurrency = 1
 local keepalive_timeout = 6000
 local telemetry_topic = ""
 local telemetry_qos = 1
@@ -32,7 +33,7 @@ local disconnect_qos = 1
 
 local forked = 0
 local function busy()
-    if forked ~= cocurrency then
+    if forked < cocurrency then
         forked = forked + 1
         return false
     else
@@ -104,7 +105,12 @@ local function handle_connect(connack, cli)
     end
     log.error(log_prefix, "connected")
     ensure_subscribe(cli, rpc_topic, rpc_qos)
-    sys.sysdp({ conf = { uri = sys_uri, id = sys_name }, app = sys_app })
+
+    local info = {
+        conf = { uri = sys_uri, id = sys_name },
+        app = sys_app
+    }
+    skynet.call(gateway_addr, "lua", "sys", "mqttapp", info)
 
     local check_timeout = keepalive_timeout+100
     local function ping()
@@ -207,7 +213,7 @@ local function handle_request(msg, cli)
         skynet.fork(function()
             local dev, cmd, arg, session = decode_request(msg)
             if dev then
-                local ok, ret = pcall(sys.request, dev, cmd, arg)
+                local ok, ret = pcall(skynet.call, gateway_addr, "lua", dev, cmd, arg)
                 if not ok then
                     log.error("call gateway failed:", dev, cmd)
                 end
@@ -219,10 +225,7 @@ local function handle_request(msg, cli)
 end
 
 local command = {}
-function command.start()
-    running = true
-    log.error(log_prefix, "started on request")
-end
+
 function command.stop()
     running = false
     local ok, err = client:disconnect()
@@ -317,7 +320,7 @@ function command.post(k, ...)
 end
 
 local function init()
-    local conf = sys.conf_get("gateway_mqtt")
+    local conf = skynet.call(sysmgr_addr, "lua", "get", "gateway_mqtt")
     if not conf then
         log.error(text.no_conf)
     else
@@ -379,7 +382,6 @@ local function init()
             end
         end)
 
-        skynet.register(sys.gateway_mqtt_addr)
         skynet.dispatch("lua", function(_, _, cmd, ...)
             local f = command[cmd]
             if f then

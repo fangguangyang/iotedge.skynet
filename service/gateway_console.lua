@@ -1,16 +1,22 @@
 local skynet = require "skynet"
 local socket = require "skynet.socket"
-local sys = require "sys"
-local log = require "log"
 local text = require("text").console
 local regex = require("text").regex
 
 local ip = "127.0.0.1"
-local port = ...
+local port, sysmgr_addr, gateway_addr = ...
 local connections = 0
 local max = 1
 local running = true
 local fds = {}
+
+local function request(...)
+    return skynet.call(gateway_addr, "lua", ...)
+end
+
+local function do_auth(...)
+    return skynet.call(sysmgr_addr, "lua", "auth", ...)
+end
 
 local function do_dump(pf, info)
     local function dump_table(t, indent)
@@ -36,8 +42,6 @@ local function do_dump(pf, info)
         pf(tostring(info))
     elseif t == "table" then
         dump_table(info, 1)
-    else
-        log.error(text.no_ret)
     end
 end
 
@@ -64,13 +68,13 @@ end
 
 local function docmd(cmdline)
     if cmdline == "help" then
-        return pcall(sys.request, cmdline)
+        return pcall(request, cmdline)
     elseif cmdline == "quit" then
         return cmdline
     else
         local dev, cmd, arg = split_cmdline(cmdline)
         if dev then
-            return pcall(sys.request, dev, cmd, arg)
+            return pcall(request, dev, cmd, arg)
         else
             return text.tip
         end
@@ -124,7 +128,7 @@ local function auth(fd)
     local u = socket.readline(fd, "\r\n")
     socket.write(fd, text.password)
     local p = socket.readline(fd, "\r\n")
-    local ok, ret = pcall(sys.auth, u, p)
+    local ok, ret = pcall(do_auth, u, p)
     return ok and ret
 end
 

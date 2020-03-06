@@ -1,18 +1,18 @@
 local skynet = require "skynet"
 local api = require "api"
 local log = require "log"
-local text = require("text").cell
+local text = require("text").appcell
 
-local tpl, id = ...
+local tpl, id, gateway_addr, gateway_mqtt_addr = ...
 local name = tpl.."_"..tostring(id)
 local command = {}
 
-local memlimit = require("sys").dp_memlimit()
+local memlimit = require("sys").memlimit()
 if memlimit then
     skynet.memlimit(memlimit)
 end
 
-local function load_dp()
+local function load_app()
     --local cache = require "skynet.codecache"
     --cache.mode("OFF")
     require(tpl)
@@ -77,7 +77,8 @@ setmetatable(command, { __index = function(t, cmd)
 end})
 
 skynet.start(function()
-    load_dp()
+    load_app()
+    api.init(gateway_addr, gateway_mqtt_addr)
     api.reg_dev(name, true)
     skynet.dispatch("lua", function(_, _, cmd, ...)
         command[cmd](...)

@@ -5,7 +5,7 @@ After=network.target
 
 [Service]
 WorkingDirectory=WORKING_DIR
-ExecStart=WORKING_DIR/build/PLAT/skynet ./build/PLAT/skynet.config.prod
+ExecStart=WORKING_DIR/bin/skynet ./skynet.config.prod
 Restart=on-failure
 
 [Install]

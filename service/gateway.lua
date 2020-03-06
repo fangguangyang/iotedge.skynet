@@ -2,9 +2,11 @@ local skynet = require "skynet"
 local log = require "log"
 local text = require("text").gateway
 
+local sysmgr_addr = ...
+
 local command = {}
 local devlist = {}
-local dplist = {}
+local applist = {}
 local internal = {
     -- self
     help = true,
@@ -22,7 +24,7 @@ local internal = {
 local function help()
     local ret = {}
     for k, v in pairs(devlist) do
-        if not v.dpname then
+        if not v.appname then
             ret[k] = {}
             ret[k].devices = v.sublist
             local cmd = {}
@@ -48,16 +50,16 @@ function command.reg_cmd(addr, name, desc)
         log.error(text.invalid_cmd)
         return
     end
-    local dp = dplist[addr]
-    if not dp then
-        log.error(text.unknown_dp)
+    local app = applist[addr]
+    if not app then
+        log.error(text.unknown_app)
         return
     end
-    if dp.cmdlist[name] then
+    if app.cmdlist[name] then
         log.error(text.dup_cmd)
         return
     end
-    dp.cmdlist[name] = desc
+    app.cmdlist[name] = desc
     log.error(text.cmd_registered, name)
 end
 
@@ -78,7 +80,7 @@ function command.reg_dev(addr, name, desc)
             cmdlist = {},
             sublist = {}
         }
-        dplist[addr] = devlist[name]
+        applist[addr] = devlist[name]
         invalidate_cache("help")
         invalidate_cache(name)
     else
@@ -86,16 +88,16 @@ function command.reg_dev(addr, name, desc)
             log.error(text.dup_dev, name)
             return
         end
-        local dp = dplist[addr]
-        if not dp then
-            log.error(text.unknown_dp)
+        local app = applist[addr]
+        if not app then
+            log.error(text.unknown_app)
             return
         end
         devlist[name] = {
             addr = addr,
-            dpname = dp.name
+            appname = app.name
         }
-        dp.sublist[name] = desc
+        app.sublist[name] = desc
         invalidate_cache(name)
     end
     log.error(text.dev_registered, name)
@@ -106,24 +108,24 @@ function command.unreg_dev(addr, name)
         log.error(text.invalid_dev)
         return
     end
-    local dp = dplist[addr]
-    if not dp then
-        log.error(text.unknown_dp)
+    local app = applist[addr]
+    if not app then
+        log.error(text.unknown_app)
         return
     end
     if name == true then
-        for dev, _ in pairs(dp.sublist) do
+        for dev, _ in pairs(app.sublist) do
             devlist[dev] = nil
             invalidate_cache(dev)
         end
-        devlist[dp.name] = nil
-        dplist[addr] = nil
+        devlist[app.name] = nil
+        applist[addr] = nil
         invalidate_cache("help")
-        invalidate_cache(dp.name)
-        log.error(text.dev_unregistered, dp.name)
+        invalidate_cache(app.name)
+        log.error(text.dev_unregistered, app.name)
     else
         devlist[name] = nil
-        dp.sublist[name] = nil
+        app.sublist[name] = nil
         invalidate_cache(name)
         log.error(text.dev_unregistered, name)
     end
@@ -142,8 +144,8 @@ setmetatable(command, { __index = function(t, dev)
             local cmdlist
             if d.cmdlist then
                 cmdlist = d.cmdlist
-            elseif d.dpname and devlist[d.dpname].cmdlist then
-                cmdlist = devlist[d.dpname].cmdlist
+            elseif d.appname and devlist[d.appname].cmdlist then
+                cmdlist = devlist[d.appname].cmdlist
             end
             if cmdlist then
                 f = function(addr, cmd, arg)
@@ -178,8 +180,8 @@ setmetatable(command, { __index = function(t, dev)
 end})
 
 skynet.start(function()
-    local cfg = require("sys").conf_get("gateway")
-    if cfg then
+    local conf = skynet.call(sysmgr_addr, "lua", "get", "gateway")
+    if conf then
         skynet.dispatch("lua", function(_, addr, cmd, ...)
             command[cmd](addr, ...)
         end)
