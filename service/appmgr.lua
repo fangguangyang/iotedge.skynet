@@ -195,7 +195,10 @@ local function load_sysapp()
         wsappid = id
         approute[id] = {}
         applist[id] = {
-            addr = wsapp
+            addr = wsapp,
+            load_time = api.datetime(),
+            app = "gateway_websocket",
+            conf = 30001
         }
         id = id + 1
     end
