@@ -252,7 +252,10 @@ end
 local function load_all()
     sysinfo.sys = conf_get("sys")
     sysinfo.sys.up = api.datetime(skynet.starttime())
-    sysinfo.sys.repo = conf_get("repo")
+    local repo = conf_get("repo")
+    if repo then
+        sysinfo.sys.repo = repo.uri
+    end
     tpllist = conf_get("tpl_list")
     load_apps()
     load_pipes()

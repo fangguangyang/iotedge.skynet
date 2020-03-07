@@ -1,7 +1,7 @@
 local seri = require "seri"
 local log = require "log"
 local producer = require "kafka.producer"
-local text = require("text").kafka
+local text = require("text").app
 
 local p
 local log_prefix = ""

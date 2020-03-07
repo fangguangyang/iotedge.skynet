@@ -7,7 +7,6 @@ local ip = "127.0.0.1"
 local port, sysmgr_addr, gateway_addr = ...
 local connections = 0
 local max = 1
-local running = true
 local fds = {}
 
 local function request(...)
@@ -133,6 +132,7 @@ local function auth(fd)
 end
 
 skynet.start(function()
+    local running = true
     local listen_socket = socket.listen(ip, port)
     socket.start(listen_socket, function(fd, addr)
         if running then

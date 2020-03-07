@@ -10,10 +10,12 @@ local text = {
         cmd_with_table_arg = "(%g+)%s+(%g+)%s+({[%s%g]*})",
         cmd_with_arg = "(%g+)%s+(%g+)%s*(%g*)"
     },
-    appcell = {
+    app = {
         unknown_cmd = "unknown command",
         no_conf_handler = "no conf handler",
-        no_data_handler = "no data handler"
+        no_data_handler = "no data handler",
+        conf_fail = "configure failed",
+        pack_fail = "pack failed"
     },
     sysmgr = {
         unknown_cmd = "unknown command",
@@ -72,7 +74,7 @@ local text = {
     console = {
         prompt = ">> ",
         sep = "",
-        welcome = "Welcome to console: 'quit' to exit, 'help' for command list",
+        welcome = "Welcome to IoTEdge",
         tip = "'help' for command list",
         ok = "CMD OK",
         nok = "CMD ERROR",
@@ -89,13 +91,6 @@ local text = {
         unpack_fail = "unpack failed",
         unknown_dev = "unknown device",
         no_conf = "not configured",
-    },
-    kafka = {
-        conf_fail = "configure failed",
-        pack_fail = "pack failed"
-    },
-    modbus = {
-        conf_fail = "configure failed"
     }
 }
 

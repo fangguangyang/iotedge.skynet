@@ -1,7 +1,7 @@
 local skynet = require "skynet"
 local api = require "api"
 local log = require "log"
-local text = require("text").appcell
+local text = require("text").app
 
 local tpl, id, gateway_addr, gateway_mqtt_addr = ...
 local name = tpl.."_"..tostring(id)

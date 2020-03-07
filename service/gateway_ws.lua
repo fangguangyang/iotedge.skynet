@@ -1,71 +1,133 @@
 local skynet = require "skynet"
-local websocket = require "http.websocket"
 local socket = require "skynet.socket"
-local sys = require "sys"
-local log = require "log"
-local text = require("text").ws
+local websocket = require "http.websocket"
 
-local port = ...
+local seri = require "seri"
+local log = require "log"
+local text = require("text").console
+
+local port, sysmgr_addr, gateway_addr = ...
+
+local protocol = "ws"
+local connected = false
+local authed = false
+
+local function decode_auth(msg)
+    local auth = seri.unpack(msg)
+    if type(auth) ~= "table" or
+        type(auth.user) ~= "string" or
+        type(auth.pass) ~= "string" then
+        return false
+    end
+    return auth.user, auth.pass
+end
+
+local function auth_respond(fd, suc)
+    local payload
+    if suc then
+        payload = seri.pack(text.welcome)
+    else
+        payload = seri.pack(text.not_auth)
+    end
+    if payload then
+        websocket.write(fd, payload)
+    end
+end
+
+local function decode_request(msg)
+    local request = seri.unpack(msg)
+    if type(request) ~= "table" or
+        type(request.dev) ~= "string" or
+        type(request.cmd) ~= "string" then
+        return false
+    end
+    return request.dev, request.cmd, request.arg
+end
+
+local function do_respond(fd, dev, cmd, ret)
+    local response = {
+        dev = dev,
+        cmd = cmd,
+        ret = ret
+    }
+    local payload = seri.pack(response)
+    if payload then
+        websocket.write(fd, payload)
+    end
+end
 
 local handle = {}
-function handle.connect(id)
-    print("ws connect from: " .. tostring(id))
+
+function handle.connect(fd)
+end
+function handle.ping(fd)
+end
+function handle.pong(fd)
+end
+function handle.error(fd)
+end
+function handle.handshake(fd, header, url)
 end
 
-function handle.handshake(id, header, url)
-    local addr = websocket.addrinfo(id)
-    print("ws handshake from: " .. tostring(id), "url", url, "addr:", addr)
-    print("----header-----")
-    for k,v in pairs(header) do
-        print(k,v)
+function handle.close(fd, code, reason)
+    connected = false
+    authed = false
+    websocket.close(fd)
+    log.error("ws closed:", fd, code, reason)
+end
+
+function handle.message(fd, msg)
+    if not authed then
+        local user, pass = decode_auth(msg)
+        if user then
+            authed = skynet.call(sysmgr_addr, "lua", "auth", user, pass)
+        end
+        auth_respond(fd, authed)
+        if not authed then
+            handle.close(fd)
+        end
+    else
+        local dev, cmd, arg = decode_request(msg)
+        if dev then
+            local ok, ret = pcall(skynet.call, gateway_addr, "lua", dev, cmd, arg)
+            do_respond(fd, dev, cmd, ret)
+        else
+            do_respond(fd, dev, cmd)
+        end
     end
-    print("--------------")
 end
 
-function handle.message(id, msg)
-    websocket.write(id, msg)
+local function on_data(dev, data)
+    if connected and authed and
+        type(dev) == "string" and type(data) == "table" then
+        local payload = seri.pack({[dev] = data})
+        if payload then
+            websocket.write(connected, payload)
+        end
+    end
 end
 
-function handle.ping(id)
-    print("ws ping from: " .. tostring(id) .. "\n")
-end
+skynet.start(function()
+    local running = true
 
-function handle.pong(id)
-    print("ws pong from: " .. tostring(id))
-end
+    seri.init(seri.JSON)
+    local listen_socket = socket.listen("0.0.0.0", port)
 
-function handle.close(id, code, reason)
-    print("ws close from: " .. tostring(id), code, reason)
-end
-
-function handle.error(id)
-    print("ws error from: " .. tostring(id))
-end
-
-skynet.start(function ()
-    skynet.dispatch("lua", function (_,_, id, protocol, addr)
-        local ok, err = websocket.accept(id, handle, protocol, addr)
-        if not ok then
-            print(err)
+    socket.start(listen_socket, function(fd, addr)
+        if running and not connected then
+            connected = fd
+            skynet.fork(websocket.accept, fd, handle, protocol, addr)
+        else
+            socket.close(fd)
         end
     end)
-end)
-
-skynet.start(function ()
-    local agent = {}
-    for i= 1, 20 do
-        agent[i] = skynet.newservice(SERVICE_NAME, "agent")
-    end
-    local balance = 1
-    local protocol = "ws"
-    local id = socket.listen("0.0.0.0", port)
-    skynet.error(string.format("Listen websocket port 9948 protocol:%s", protocol))
-    socket.start(id, function(id, addr)
-        print(string.format("accept client socket_id: %s addr:%s", id, addr))
-        skynet.send(agent[balance], "lua", id, protocol, addr)
-        balance = balance + 1
-        if balance > #agent then
-            balance = 1
+    skynet.dispatch("lua", function(_, _, cmd, ...)
+        if cmd == "stop" then
+            running = false
+            socket.close(listen_socket)
+            websocket.close(connected)
+        elseif cmd == "data" then
+            on_data(...)
         end
     end)
 end)

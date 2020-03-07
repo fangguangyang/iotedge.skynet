@@ -1,5 +1,5 @@
 local log = require "log"
-local text = require("text").modbus
+local text = require("text").app
 local api = require "api"
 local client = require "modbus.client"
 local pdu = require "modbus.pdu"

@@ -48,5 +48,5 @@ gateway_mqtt = {
     secure = false,
     keep_alive = 60,
     seri = 'json',
-    cocurrency = 5
+    cocurrency = 1
 }
