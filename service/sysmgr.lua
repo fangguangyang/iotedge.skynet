@@ -7,12 +7,10 @@ local http = require "utils.http"
 local log = require "log"
 local sys = require "sys"
 local text = require("text").sysmgr
-local regex = require("text").regex
 
 local app_root = "./app"
 local run_root = "./run"
 local repo_cfg = run_root.."/repo.lua"
-local app_cfg = run_root.."/app.lua"
 local pipe_cfg = run_root.."/pipe.lua"
 local meta_lua = "meta"
 local entry_lua = "entry"
@@ -96,7 +94,7 @@ local function validate_tpl(tpl_dir)
     local function do_validate(suffix)
         local attr = lfs.attributes(tpl_dir.."/"..entry_lua..suffix)
         if attr and attr.mode == "file" and attr.size ~= 0 then
-            meta = {}
+            local meta = {}
             load_cfg(tpl_dir.."/"..meta_lua..suffix, meta)
             if type(meta.conf) == "table" then
                 return meta.conf
@@ -110,16 +108,51 @@ local function validate_tpl(tpl_dir)
     return do_validate(".luac") or do_validate(".lua")
 end
 
-local function load_tpl(tpl)
+local function load_tpl(tpl_list)
     local conf
     for dir in lfs.dir(app_root) do
         if dir ~= "." and dir ~= ".." then
-            if tpl[dir] then
+            if tpl_list[dir] then
                 log.error(text.dup_tpl, dir)
             else
                 conf = validate_tpl(app_root.."/"..dir)
                 if conf then
-                    tpl[dir] = conf
+                    tpl_list[dir] = conf
+                else
+                    log.error(text.invalid_meta, dir)
+                end
+            end
+        end
+    end
+end
+
+local function validate_app(app)
+    local attr = lfs.attributes(app)
+    if attr and attr.mode == "file" and attr.size ~= 0 then
+        local app_conf = {}
+        load_cfg(app, app_conf)
+        local tpl, conf = next(app_conf)
+        if type(tpl) == "string" and type(conf) == "table" then
+            return tpl, conf
+        else
+            return false
+        end
+    else
+        return false
+    end
+end
+
+local function load_app(app_list)
+    local conf
+    for dir in lfs.dir(run_root) do
+        local id = tonumber(dir:match("_(%d+)%.lua$"))
+        if id then
+            if app_list[id] then
+                log.error(text.dup_app, dir)
+            else
+                local tpl, conf = validate_app(run_root.."/"..dir)
+                if tpl then
+                    app_list[id] = { [tpl] = conf }
                 else
                     log.error(text.invalid_meta, dir)
                 end
@@ -129,10 +162,10 @@ local function load_tpl(tpl)
 end
 
 local cfg = {
-    tpl_list = {},
     repo = false,
+    pipe_list = {},
     app_list = {},
-    pipe_list = {}
+    tpl_list = {}
 }
 
 local userpass
@@ -149,11 +182,12 @@ local function load_all()
     load_cfg(skynet.getenv("cfg"), cfg)
     -- repo
     load_cfg(repo_cfg, cfg)
-    -- app_list
-    load_cfg(app_cfg, cfg)
     -- pipe_list
     load_cfg(pipe_cfg, cfg)
 
+    -- app_list
+    load_app(cfg.app_list)
+    -- tpl_list
     load_tpl(cfg.tpl_list)
 end
 
@@ -167,35 +201,27 @@ local function backup(from, to)
     f:close()
 end
 
-local function save_cfg(file, key)
-    return function(conf)
-        local ok, err = pcall(function()
-            local t = {}
-            t[key] = conf
-            local str = dump_cfg(t)
-            local attr = lfs.attributes(file)
-            if attr then
-                backup(file, bak_file(file))
-            end
-            local f = io.open(file, "w")
-            f:write(str)
-            f:close()
-        end)
-        if ok then
-            cfg[key] = conf
-            log.error(text.config_update_suc, file)
-            return ok
-        else
-            log.error(text.config_update_fail, file, err)
-            return ok, err
+local function save_cfg(file, key, conf)
+    local ok, err = pcall(function()
+        local t = {}
+        t[key] = conf
+        local str = dump_cfg(t)
+        local attr = lfs.attributes(file)
+        if attr then
+            backup(file, bak_file(file))
         end
+        local f = io.open(file, "w")
+        f:write(str)
+        f:close()
+    end)
+    if ok then
+        log.error(text.config_update_suc, file)
+        return ok
+    else
+        log.error(text.config_update_fail, file, err)
+        return ok, err
     end
 end
-
-local update_map = {
-    app_list = save_cfg(app_cfg, "app_list"),
-    pipe_list = save_cfg(pipe_cfg, "pipe_list")
-}
 
 local command = {}
 
@@ -204,12 +230,24 @@ function command.auth(username, password)
     crypt.hmac_sha1(md5.sumhexa(password), cfg.auth.salt) == userpass
 end
 
-function command.set(key, conf)
-    local f = update_map[key]
-    if f then
-        return f(conf)
+function command.save_app(id, tpl, conf)
+    local app_cfg = tpl.."_"..id
+    local ok, err = save_cfg(app_cfg, tpl, conf)
+    if ok then
+        cfg["app_list"][id] = { [tpl] = conf }
+        return ok
     else
-        return false, text.read_only
+        return ok, err
+    end
+end
+
+function command.save_pipelist(list)
+    local ok, err = save_cfg(pipe_cfg, "pipe_list", list)
+    if ok then
+        cfg["pipe_list"] = list
+        return ok
+    else
+        return ok, err
     end
 end
 
@@ -267,15 +305,17 @@ function command.install_tpl(name)
 end
 
 function command.set_repo(uri, auth)
-    local k, v = auth:match(regex.k_v)
+    local k, v = auth:match("^([%g%s]+):([%g%s]+)$")
     if not k or not v then
         return false, text.invalid_auth
     end
     local a = { [k] = v }
     local ok = http.get(uri, a)
     if ok then
-        ok, err = save_cfg(repo_cfg, "repo")({uri=uri, auth=a})
+        local conf = {uri=uri, auth=a}
+        ok, err = save_cfg(repo_cfg, "repo", conf)
         if ok then
+            cfg["repo"] = conf
             return ok
         else
             return ok, err
@@ -290,7 +330,7 @@ local function cluster_port()
 end
 
 local function total_conf()
-    return { repo = cfg.repo, app_list = cfg.app_list, pipe_list = cfg.pipe_list }
+    return { repo = cfg.repo, apps = cfg.app_list, pipes = cfg.pipe_list }
 end
 
 local function cluster_reload(c, port)

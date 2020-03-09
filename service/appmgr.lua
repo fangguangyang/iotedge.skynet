@@ -25,15 +25,6 @@ local approute = {}
 local function conf_get(k)
     return skynet.call(sysmgr_addr, "lua", "get", k)
 end
-local function conf_set(k, v)
-    return skynet.call(sysmgr_addr, "lua", "set", k, v)
-end
-local function install_tpl(tpl)
-    return skynet.call(sysmgr_addr, "lua", "install_tpl", tpl)
-end
-local function upgrade(version)
-    return skynet.call(sysmgr_addr, "lua", "upgrade", version)
-end
 
 local function clone(tpl, custom)
     local copy
@@ -56,15 +47,13 @@ local function clone(tpl, custom)
     return copy
 end
 
-local function save_applist()
-    local list = {}
-    for k, v in pairs(applist) do
-        if k ~= mqttappid and k ~= wsappid then
-            list[k] = {}
-            list[k][v.app] = v.conf
-        end
-    end
-    conf_set("app_list", list)
+local function save_app(id)
+    local app = applist[id]
+    skynet.call(sysmgr_addr, "lua", "save_app", id, app.app, app.conf)
+end
+
+local function clean_app(id, tpl)
+    skynet.call(sysmgr_addr, "lua", "clean_app", id, tpl)
 end
 
 local function save_pipelist()
@@ -74,7 +63,7 @@ local function save_pipelist()
         list[k].auto = (v.start_time ~= false)
         list[k].apps = v.apps
     end
-    conf_set("pipe_list", list)
+    skynet.call(sysmgr_addr, "lua", "save_pipelist", list)
 end
 
 local function load_app(id, tpl, conf)
@@ -91,7 +80,7 @@ local function load_app(id, tpl, conf)
         end
 
         installlist[tpl] = true
-        local ok, ret = install_tpl(tpl)
+        local ok, ret = skynet.call(sysmgr_addr, "lua", "install_tpl", tpl)
         installlist[tpl] = false
         if ok then
             tpllist[tpl] = ret
@@ -287,9 +276,9 @@ function command.clean()
             skynet.send(app.addr, "lua", "exit")
             approute[id] = nil
             applist[id] = nil
+            clean_app(id, app.app)
         end
     end
-    save_applist()
     log.error(text.cleaned)
     return true
 end
@@ -309,7 +298,7 @@ function command.upgrade(version)
         return false, text.invalid_repo
     end
     locked = true
-    local ok, ret = upgrade(version)
+    local ok, ret = skynet.call(sysmgr_addr, "lua", "upgrade", version)
     --locked = false
     return ok, ret
 end
@@ -365,7 +354,7 @@ function command.app_new(arg)
     local id = #approute + 1
     local ok, ret = load_app(id, arg.app, conf)
     if ok then
-        save_applist()
+        save_app(id)
         return true, id
     else
         return false, ret
@@ -394,7 +383,7 @@ function command.app_remove(idstr)
     skynet.send(app.addr, "lua", "exit")
     applist[id] = nil
     approute[id] = nil
-    save_applist()
+    clean_app(id, app.app)
     return true
 end
 
@@ -527,12 +516,13 @@ function command.configure(arg)
         for _, app in ipairs(arg.apps) do
             local id = #approute + 1
             local ok, err = load_app(id, app.app, app.conf or {})
-            if not ok then
+            if ok then
+                save_app(id)
+            else
                 locked = false
                 return ok, err
             end
         end
-        save_applist()
 
         for _, pipe in ipairs(arg.pipes) do
             if start ~= 0 then
@@ -557,14 +547,16 @@ function command.configure(arg)
     else
         for id, conf in pairs(arg) do
             if not applist[id] or type(conf) ~= "table" then
-               locked = false
-               return false, text.invalid_arg
+                locked = false
+                return false, text.invalid_arg
             end
         end
         for id, conf in pairs(arg) do
-             local app = applist[id]
-             local full_conf = clone(tpllist[app.app], conf)
-             skynet.send(app.addr, "lua", "conf", full_conf)
+            local app = applist[id]
+            local full_conf = clone(tpllist[app.app], conf)
+            skynet.send(app.addr, "lua", "conf", full_conf)
+            app.conf = conf
+            save_app(id)
         end
     end
     locked = false
