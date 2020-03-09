@@ -234,14 +234,6 @@ function command.stop()
     end
 end
 
-function command.route_add(s, t)
-    -- do nothing
-end
-
-function command.route_del(s, t)
-    -- do nothing
-end
-
 function command.data(dev, data)
     if type(dev) ~= "string" or type(data) ~= "table" then
         log.error(log_prefix, "telemetry publish failed")

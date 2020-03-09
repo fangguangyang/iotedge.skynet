@@ -13,12 +13,9 @@ local sysmgr_addr, gateway_addr, wsapp, mqttapp = ...
 local wsappid = nil
 local mqttappid = nil
 
-local sysinfo = {
-    apps = {},
-    pipes = {}
-}
-local applist = sysinfo.apps
-local pipelist = sysinfo.pipes
+local sysinfo = {}
+local applist = {}
+local pipelist = {}
 local tpllist = {}
 
 local installlist = {}
@@ -36,9 +33,6 @@ local function install_tpl(tpl)
 end
 local function upgrade(version)
     return skynet.call(sysmgr_addr, "lua", "upgrade", version)
-end
-local function set_repo(uri, auth)
-    return skynet.call(sysmgr_addr, "lua", "set_repo", uri, auth)
 end
 
 local function clone(tpl, custom)
@@ -233,6 +227,7 @@ end
 
 local cmd_desc = {
     mqttapp = true,
+    clean = true,
     set_repo = "Set SW repository: {uri=<string>,auth=<string>}",
     configure = "System configure: {}",
     upgrade = "System upgrade: <string>",
@@ -274,11 +269,28 @@ function command.apps()
 end
 
 function command.info()
+    sysinfo.apps = applist
+    sysinfo.pipes = pipelist
     sysinfo.sys.uptime = string.format("%d seconds", math.floor(skynet.now()/100))
     return sysinfo
 end
 
 function command.clean()
+    for id, _ in pairs(pipelist) do
+        stop_pipe(id)
+    end
+    pipelist = {}
+    save_pipelist()
+
+    for id, app in pairs(applist) do
+        if id ~= mqttappid and id ~= wsappid then
+            skynet.send(app.addr, "lua", "exit")
+            approute[id] = nil
+            applist[id] = nil
+        end
+    end
+    save_applist()
+    log.error(text.cleaned)
     return true
 end
 
@@ -302,22 +314,26 @@ function command.upgrade(version)
     return ok, ret
 end
 
-function command.set_repo(arg)
-    if locked then
-        return false, text.locked
-    end
+local function set_repo(arg)
     if type(arg) ~= "table" or
         type(arg.uri) ~= "string" or
         type(arg.auth) ~= "string" then
         return false, text.invalid_arg
     end
-    local ok, ret = set_repo(arg.uri, arg.auth)
+    local ok, ret = skynet.call(sysmgr_addr, "lua", "set_repo", arg.uri, arg.auth)
     if ok then
         sysinfo.sys.repo = arg.uri
         return true
     else
         return false, ret
     end
+end
+
+function command.set_repo(arg)
+    if locked then
+        return false, text.locked
+    end
+    return set_repo(arg)
 end
 
 function command.mqttapp(info)
@@ -473,13 +489,86 @@ function command.configure(arg)
         return false, text.invalid_arg
     end
     locked = true
-    local ok = true
-    locked = false
-    if ok then
-        return ok
-    else
-        return ok, ret
+
+    if arg.repo then
+        local ok, err = set_repo(arg.repo)
+        if not ok then
+            locked = false
+            return ok, err
+        end
     end
+
+    if type(arg.apps) == "table" and type(arg.pipes) == "table" then
+        for _, pipe in ipairs(arg.pipes) do
+            if #pipe <= 1 then
+                locked = false
+                return false, text.invalid_arg
+            end
+            for _, id in ipairs(pipe) do
+                if id == "mqtt" then
+                    if not mqttappid then
+                        locked = false
+                        return false, text.invalid_arg
+                    end
+                else
+                    local app = arg.apps[id]
+                    if type(app) ~= "table" or
+                        type(app.app) ~= "string" or
+                        (type(app.conf) ~= "nil" and type(app.conf) ~= "table") then
+                        locked = false
+                        return false, text.invalid_arg
+                    end
+                end
+            end
+        end
+        command.clean()
+
+        local start = #approute
+        for _, app in ipairs(arg.apps) do
+            local id = #approute + 1
+            local ok, err = load_app(id, app.app, app.conf or {})
+            if not ok then
+                locked = false
+                return ok, err
+            end
+        end
+        save_applist()
+
+        for _, pipe in ipairs(arg.pipes) do
+            if start ~= 0 then
+                for id, v in ipairs(pipe) do
+                    if v == "mqtt" then
+                        pipe[id] = mqttappid
+                    else
+                        pipe[id] = start + v
+                    end
+                end
+            end
+            local id = #pipelist + 1
+            local ok, err = load_pipe(id, pipe)
+            if ok then
+                start_pipe(id)
+            else
+                locked = false
+                return ok, err
+            end
+        end
+        save_pipelist()
+    else
+        for id, conf in pairs(arg) do
+            if not applist[id] or type(conf) ~= "table" then
+               locked = false
+               return false, text.invalid_arg
+            end
+        end
+        for id, conf in pairs(arg) do
+             local app = applist[id]
+             local full_conf = clone(tpllist[app.app], conf)
+             skynet.send(app.addr, "lua", "conf", full_conf)
+        end
+    end
+    locked = false
+    return true
 end
 
 local function signal(addr)
