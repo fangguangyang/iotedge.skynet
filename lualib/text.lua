@@ -62,7 +62,6 @@ local text = {
     },
     gateway = {
         unknown_request = "unknown device or cmd",
-        internal_err = "internal error",
         invalid_dev = "invalid DEVICE name or description",
         dup_dev = "DEVICE name already used",
         dev_registered = "new DEVICE registered",
@@ -78,8 +77,6 @@ local text = {
         sep = "",
         welcome = "Welcome to IoTEdge",
         tip = "'help' for command list",
-        ok = "CMD OK",
-        nok = "CMD ERROR",
         not_auth = "Not authorized",
         max = "Max connection reached",
         username = "Username: ",

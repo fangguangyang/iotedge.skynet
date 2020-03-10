@@ -13,5 +13,3 @@ gateway = {
     flowcontrol = false,
     audit = false
 }
-gateway_console = true
-gateway_ws = true

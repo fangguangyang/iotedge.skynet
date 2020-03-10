@@ -8,12 +8,6 @@ local command = {}
 local devlist = {}
 local applist = {}
 local internal = {
-    -- self
-    help = true,
-    reg_cmd = true,
-    reg_dev = true,
-    unreg_dev = true,
-    -- DP
     route_add = true,
     route_del = true,
     data = true,
@@ -41,6 +35,14 @@ end
 
 local function invalidate_cache(name)
     command[name] = nil
+end
+
+function command.conf_get(addr, k)
+    skynet.ret(skynet.pack(skynet.call(sysmgr_addr, "lua", "get", k)))
+end
+
+function command.auth(addr, user, pass)
+    skynet.ret(skynet.pack(skynet.call(sysmgr_addr, "lua", "auth", user, pass)))
 end
 
 function command.reg_cmd(addr, name, desc)
@@ -153,25 +155,25 @@ setmetatable(command, { __index = function(t, dev)
                         local ok, ret, err = pcall(skynet.call, d.addr, "lua", cmd, dev, arg)
                         if ok then
                             if err then
-                                skynet.ret(skynet.pack({ ret, err }))
+                                skynet.ret(skynet.pack(ret, err))
                             else
                                 skynet.ret(skynet.pack(ret))
                             end
                         else
-                            skynet.ret(skynet.pack({ text.internal_err, ret }))
+                            skynet.ret(skynet.pack(false, ret))
                         end
                     else
-                        skynet.ret(skynet.pack(text.unknown_request))
+                        skynet.ret(skynet.pack(false, text.unknown_request))
                     end
                 end
             else
                 f = function(...)
-                    skynet.ret(skynet.pack(text.unknown_request))
+                    skynet.ret(skynet.pack(false, text.unknown_request))
                 end
             end
         else
             f = function(...)
-                skynet.ret(skynet.pack(text.unknown_request))
+                skynet.ret(skynet.pack(false, text.unknown_request))
             end
         end
     end

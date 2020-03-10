@@ -13,8 +13,6 @@ gateway = {
     flowcontrol = false,
     audit = false
 }
-gateway_console = true
-gateway_ws = true
 gateway_mqtt = {
     tpl = "gateway_mqtt_tb",
     id = 'MQTT_ID',

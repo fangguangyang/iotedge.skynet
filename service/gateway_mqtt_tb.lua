@@ -4,7 +4,7 @@ local seri = require "seri"
 local mqtt = require "mqtt"
 local text = require("text").mqtt
 
-local sysmgr_addr, gateway_addr = ...
+local gateway_addr = ...
 
 local client
 local running = true
@@ -213,11 +213,12 @@ local function handle_request(msg, cli)
         skynet.fork(function()
             local dev, cmd, arg, session = decode_request(msg)
             if dev then
-                local ok, ret = pcall(skynet.call, gateway_addr, "lua", dev, cmd, arg)
-                if not ok then
-                    log.error("call gateway failed:", dev, cmd)
+                local ok, ret = skynet.call(gateway_addr, "lua", dev, cmd, arg)
+                if ret then
+                    do_respond(cli, dev, { ok, ret }, session)
+                else
+                    do_respond(cli, dev, ok, session)
                 end
-                do_respond(cli, dev, ret, session)
             end
             done()
         end)
@@ -312,7 +313,7 @@ function command.post(k, ...)
 end
 
 local function init()
-    local conf = skynet.call(sysmgr_addr, "lua", "get", "gateway_mqtt")
+    local conf = skynet.call(gateway_addr, "lua", "conf_get", "gateway_mqtt")
     if not conf then
         log.error(text.no_conf)
     else

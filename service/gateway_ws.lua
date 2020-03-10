@@ -6,7 +6,7 @@ local seri = require "seri"
 local log = require "log"
 local text = require("text").console
 
-local port, sysmgr_addr, gateway_addr = ...
+local port, gateway_addr = ...
 
 local protocol = "ws"
 local connected = false
@@ -80,19 +80,31 @@ function handle.message(fd, msg)
     if not authed then
         local user, pass = decode_auth(msg)
         if user then
-            authed = skynet.call(sysmgr_addr, "lua", "auth", user, pass)
+            authed = skynet.call(gateway_addr, "lua", "auth", user, pass)
         end
         auth_respond(fd, authed)
         if not authed then
             handle.close(fd)
         end
     else
-        local dev, cmd, arg = decode_request(msg)
-        if dev then
-            local ok, ret = pcall(skynet.call, gateway_addr, "lua", dev, cmd, arg)
-            do_respond(fd, dev, cmd, ret)
+        if msg == "help" then
+            local h = skynet.call(gateway_addr, "lua", msg)
+            local payload = seri.pack(h)
+            if payload then
+                websocket.write(fd, payload)
+            end
         else
-            do_respond(fd, dev, cmd)
+            local dev, cmd, arg = decode_request(msg)
+            if dev then
+                local ok, ret = skynet.call(gateway_addr, "lua", dev, cmd, arg)
+                if ret then
+                    do_respond(fd, dev, cmd, { ok, ret })
+                else
+                    do_respond(fd, dev, cmd, ok)
+                end
+            else
+                do_respond(fd, dev, cmd, { false, text.tip })
+            end
         end
     end
 end

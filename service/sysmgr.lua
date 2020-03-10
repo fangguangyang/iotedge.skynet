@@ -245,21 +245,25 @@ end
 
 function command.clean_app(id, tpl)
     local f = app_cfg(id, tpl)
-    local attr = lfs.attributes(f)
-    if attr and attr.mode == "file" and attr.size ~= 0 then
-        os.remove(f)
-    end
+    os.remove(f)
+    os.remove(bak_file(f))
     cfg.app_list[id] = nil
 end
 
 function command.save_pipelist(list)
     local ok, err = save_cfg(pipe_cfg, "pipe_list", list)
     if ok then
-        cfg["pipe_list"] = list
+        cfg.pipe_list = list
         return ok
     else
         return ok, err
     end
+end
+
+function command.clean_pipelist()
+    os.remove(pipe_cfg)
+    os.remove(bak_file(pipe_cfg))
+    cfg.pipe_list = {}
 end
 
 function command.get(key)
@@ -326,7 +330,7 @@ function command.set_repo(uri, auth)
         local conf = {uri=uri, auth=a}
         ok, err = save_cfg(repo_cfg, "repo", conf)
         if ok then
-            cfg["repo"] = conf
+            cfg.repo = conf
             return ok
         else
             return ok, err
@@ -405,14 +409,11 @@ function command.upgrade(version)
             end
 
             skynet.call(cfg.appmgr, "lua", "clean")
-            if cfg.gateway_ws then
-                skynet.send(cfg.gateway_ws, "lua", "stop")
-            end
+            skynet.send(cfg.gateway_console, "lua", "stop")
+            skynet.send(cfg.gateway_ws, "lua", "stop")
+
             if cfg.gateway_mqtt then
                 skynet.send(cfg.gateway_mqtt_addr, "lua", "stop")
-            end
-            if cfg.gateway_console then
-                skynet.send(cfg.gateway_console, "lua", "stop")
             end
             skynet.sleep(200)
 
@@ -456,21 +457,15 @@ local function launch()
     cluster.open(cluster_reload(cluster, cluster_port()))
     log.error("Gateway started")
 
-    if cfg.gateway_console then
-        cfg.gateway_console = skynet.uniqueservice("gateway_console", 30000, s, g)
-        log.error("Console started")
-    end
+    cfg.gateway_console = skynet.uniqueservice("gateway_console", 30000, g)
+    log.error("Console started")
 
-    if cfg.gateway_ws then
-        cfg.gateway_ws = skynet.uniqueservice("gateway_ws", 30001, s, g)
-        log.error("Websocket started")
-    else
-        cfg.gateway_ws = -1
-    end
+    cfg.gateway_ws = skynet.uniqueservice("gateway_ws", 30001, g)
+    log.error("Websocket started")
 
     if cfg.gateway_mqtt then
         local c = cfg.gateway_mqtt.tpl
-        cfg.gateway_mqtt_addr = skynet.uniqueservice(c, s, g)
+        cfg.gateway_mqtt_addr = skynet.uniqueservice(c, g)
         log.error("MQTT started", c)
     else
         cfg.gateway_mqtt_addr = -1

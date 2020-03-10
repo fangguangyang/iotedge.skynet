@@ -4,18 +4,10 @@ local text = require("text").console
 local regex = require("text").regex
 
 local ip = "127.0.0.1"
-local port, sysmgr_addr, gateway_addr = ...
+local port, gateway_addr = ...
 local connections = 0
 local max = 1
 local fds = {}
-
-local function request(...)
-    return skynet.call(gateway_addr, "lua", ...)
-end
-
-local function do_auth(...)
-    return skynet.call(sysmgr_addr, "lua", "auth", ...)
-end
 
 local function do_dump(pf, info)
     local function dump_table(t, indent)
@@ -67,13 +59,13 @@ end
 
 local function docmd(cmdline)
     if cmdline == "help" then
-        return pcall(request, cmdline)
+        return skynet.call(gateway_addr, "lua", cmdline)
     elseif cmdline == "quit" then
         return cmdline
     else
         local dev, cmd, arg = split_cmdline(cmdline)
         if dev then
-            return pcall(request, dev, cmd, arg)
+            return skynet.call(gateway_addr, "lua", dev, cmd, arg)
         else
             return text.tip
         end
@@ -87,7 +79,6 @@ local function console_main_loop(fd)
     local function dump(info)
         do_dump(pf, info)
     end
-    dump(text.sep)
     dump(text.welcome)
     dump(text.sep)
 
@@ -97,17 +88,11 @@ local function console_main_loop(fd)
             local cmdline = socket.readline(fd, "\r\n")
             if cmdline:match(regex.valid_cmd) then
                 local ok, ret = docmd(cmdline)
-                if ok == true then
-                    dump(text.sep)
-                    dump(text.ok)
-                    dump(text.sep)
-                    dump(ret)
-                    dump(text.sep)
-                elseif ok == false then
-                    dump(text.sep)
-                    dump(text.nok)
-                    dump(text.sep)
-                    dump(ret)
+                if type(ok) == "boolean" then
+                    dump(ok)
+                    if ret then
+                        dump(ret)
+                    end
                     dump(text.sep)
                 elseif ok == "quit" then
                     break
@@ -127,8 +112,7 @@ local function auth(fd)
     local u = socket.readline(fd, "\r\n")
     socket.write(fd, text.password)
     local p = socket.readline(fd, "\r\n")
-    local ok, ret = pcall(do_auth, u, p)
-    return ok and ret
+    return skynet.call(gateway_addr, "lua", "auth", u, p)
 end
 
 skynet.start(function()
