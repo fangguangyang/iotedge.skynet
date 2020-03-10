@@ -11,6 +11,7 @@ local port, gateway_addr = ...
 local protocol = "ws"
 local connected = false
 local authed = false
+local count = 0
 
 local function decode_auth(msg)
     local auth = seri.unpack(msg)
@@ -70,6 +71,7 @@ function handle.handshake(fd, header, url)
 end
 
 function handle.close(fd, code, reason)
+    count = 0
     connected = false
     authed = false
     websocket.close(fd)
@@ -83,11 +85,17 @@ function handle.message(fd, msg)
             authed = skynet.call(gateway_addr, "lua", "auth", user, pass)
         end
         auth_respond(fd, authed)
-        if not authed then
-            handle.close(fd)
+        if authed then
+            count = 0
+        else
+            count = count + 1
+            if count >= 3 then
+                websocket.write(fd, text.closed)
+                handle.close(fd)
+            end
         end
     else
-        if msg == "help" then
+        if msg:match("^help") then
             local h = skynet.call(gateway_addr, "lua", msg)
             local payload = seri.pack(h)
             if payload then
@@ -103,7 +111,7 @@ function handle.message(fd, msg)
                     do_respond(fd, dev, cmd, ok)
                 end
             else
-                do_respond(fd, dev, cmd, { false, text.tip })
+                websocket.write(fd, text.tip)
             end
         end
     end

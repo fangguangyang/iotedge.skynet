@@ -76,11 +76,12 @@ local text = {
         prompt = ">> ",
         sep = "",
         welcome = "Welcome to IoTEdge",
-        tip = "'help' for command list",
+        tip = "help for command list",
         not_auth = "Not authorized",
         max = "Max connection reached",
         username = "Username: ",
-        password = "Password: "
+        password = "Password: ",
+        closed = "Connection closed"
     },
     mqtt = {
         invalid_req = "invalid request received",
