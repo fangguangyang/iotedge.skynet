@@ -3,8 +3,7 @@ local api = require "api"
 local log = require "log"
 local text = require("text").app
 
-local tpl, id, gateway_addr, gateway_mqtt_addr = ...
-local name = tpl.."_"..tostring(id)
+local tpl, name, gateway_addr, gateway_mqtt_addr = ...
 local command = {}
 
 local memlimit = require("sys").memlimit()

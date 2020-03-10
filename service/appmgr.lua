@@ -10,8 +10,8 @@ local limit = 4 -- 15 seconds
 local locked = true
 
 local sysmgr_addr, gateway_addr, wsapp, mqttapp = ...
-local wsappid = 1
-local mqttappid = nil
+local wsappid = "ws"
+local mqttappid = "mqtt"
 
 local sysinfo = {}
 local applist = {}
@@ -66,6 +66,14 @@ local function save_pipelist()
     skynet.call(sysmgr_addr, "lua", "save_pipelist", list)
 end
 
+local function app_name(id, tpl)
+    return tpl.."_"..id
+end
+
+local function app_tpl(name)
+    return name:match("_(%d+)$")
+end
+
 local function load_app(id, tpl, conf)
     if not tpllist[tpl] then
         if type(tpl) ~= "string" or
@@ -90,25 +98,25 @@ local function load_app(id, tpl, conf)
     end
 
     -- Borrow to reserve id
-    approute[id] = {}
-    local ok, addr = pcall(skynet.newservice, "appcell", tpl, id, gateway_addr, mqttapp)
+    local name = app_name(id, tpl)
+    approute[name] = {}
+    local ok, addr = pcall(skynet.newservice, "appcell", tpl, name, gateway_addr, mqttapp)
     if not ok then
-        approute[id] = nil
-        log.error(text.load_fail, id, tpl, addr)
+        approute[name] = nil
+        log.error(text.load_fail, name, addr)
         return false, text.load_fail
     end
 
     local full_conf = clone(tpllist[tpl], conf)
     skynet.send(addr, "lua", "conf", full_conf)
 
-    applist[id] = {
+    applist[name] = {
         addr = addr,
         load_time = api.datetime(),
-        app = tpl,
         conf = conf
     }
     appmonitor[addr] = {
-        id = id,
+        id = name,
         counter = 0
     }
     log.error(text.load_suc, id, tpl)
@@ -181,7 +189,6 @@ local function load_sysapp()
         conf = 30001
     }
     if tonumber(mqttapp) ~= -1 then
-        mqttappid = 2
         approute[mqttappid] = {}
         applist[mqttappid] = {
             addr = mqttapp
@@ -193,9 +200,8 @@ local function load_apps()
     load_sysapp()
     local apps = conf_get("app_list")
     for id, app in pairs(apps) do
-        for tpl, conf in pairs(app) do
-            load_app(id, tpl, conf)
-        end
+        local tpl, conf = next(app)
+        load_app(id, tpl, conf)
     end
 end
 
@@ -271,7 +277,7 @@ function command.clean()
             skynet.send(app.addr, "lua", "exit")
             approute[id] = nil
             applist[id] = nil
-            clean_app(id, app.app)
+            clean_app(id)
         end
     end
     log.error(text.cleaned)
@@ -349,7 +355,7 @@ function command.app_new(arg)
     local id = #approute + 1
     local ok, ret = load_app(id, arg.app, conf)
     if ok then
-        save_app(id)
+        save_app(app_name(id, tpl))
         return true, id
     else
         return false, ret
@@ -378,7 +384,7 @@ function command.app_remove(idstr)
     skynet.send(app.addr, "lua", "exit")
     applist[id] = nil
     approute[id] = nil
-    clean_app(id, app.app)
+    clean_app(id)
     return true
 end
 
@@ -489,16 +495,20 @@ function command.configure(arg)
                 return false, text.invalid_arg
             end
             for _, id in ipairs(pipe) do
-                if id == "mqtt" then
-                    if not mqttappid then
+                if id == mqttappid then
+                    if not applist[id] then
                         locked = false
                         return false, text.invalid_arg
                     end
                 else
                     local app = arg.apps[id]
-                    if type(app) ~= "table" or
-                        type(app.app) ~= "string" or
-                        (type(app.conf) ~= "nil" and type(app.conf) ~= "table") then
+                    if type(app) == "table" then
+                        local tpl, conf = next(app)
+                        if type(tpl) ~= "string" or type(conf) ~= "table" then
+                            locked = false
+                            return false, text.invalid_arg
+                        end
+                    else
                         locked = false
                         return false, text.invalid_arg
                     end
@@ -507,12 +517,11 @@ function command.configure(arg)
         end
         command.clean()
 
-        local start = #approute
-        for i, app in ipairs(arg.apps) do
-            local id = start + i
-            local ok, err = load_app(id, app.app, app.conf or {})
+        for id, app in ipairs(arg.apps) do
+            local tpl, conf = next(app)
+            local ok, err = load_app(id, tpl, conf)
             if ok then
-                save_app(id)
+                save_app(app_name(id))
             else
                 locked = false
                 return ok, err
@@ -520,13 +529,6 @@ function command.configure(arg)
         end
 
         for id, pipe in ipairs(arg.pipes) do
-            for i, v in ipairs(pipe) do
-                if v == "mqtt" then
-                    pipe[i] = mqttappid
-                else
-                    pipe[i] = start + v
-                end
-            end
             local ok, err = load_pipe(id, pipe)
             if ok then
                 start_pipe(id)
@@ -538,17 +540,19 @@ function command.configure(arg)
         save_pipelist()
     else
         for _, app in ipairs(arg) do
-            if not applist[app.id] or type(app.conf) ~= "table" then
+            local id, conf = next(app)
+            if not applist[id] or type(conf) ~= "table" then
                 locked = false
                 return false, text.invalid_arg
             end
         end
         for _, app in ipairs(arg) do
-            local a = applist[app.id]
-            local full_conf = clone(tpllist[a.app], app.conf)
+            local id, conf = next(app)
+            local a = applist[id]
+            local full_conf = clone(tpllist[app_tpl[id]], conf)
             skynet.send(a.addr, "lua", "conf", full_conf)
-            a.conf = app.conf
-            save_app(app.id)
+            a.conf = conf
+            save_app(id)
         end
     end
     locked = false
