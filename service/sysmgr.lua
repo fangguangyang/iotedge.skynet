@@ -60,8 +60,40 @@ local function dump_cfg(conf)
     return table.concat(lines, '\n')
 end
 
+local function backup(from, to)
+    local f = io.open(from)
+    local conf = f:read("a")
+    f:close()
+
+    f = io.open(to, "w")
+    f:write(conf)
+    f:close()
+end
+
 local function bak_file(file)
     return file..".bak"
+end
+
+local function save_cfg(file, key, conf)
+    local ok, err = pcall(function()
+        local t = {}
+        t[key] = conf
+        local str = dump_cfg(t)
+        local attr = lfs.attributes(file)
+        if attr then
+            backup(file, bak_file(file))
+        end
+        local f = io.open(file, "w")
+        f:write(str)
+        f:close()
+    end)
+    if ok then
+        log.error(text.config_update_suc, file)
+        return ok
+    else
+        log.error(text.config_update_fail, file, err)
+        return ok, err
+    end
 end
 
 local function load_cfg(file, env)
@@ -142,19 +174,26 @@ local function validate_app(app)
     end
 end
 
+local function app_cfg(id, tpl)
+    return run_root.."/"..tpl.."_"..id..".lua"
+end
+
+local function app_id(app_cfg)
+    return tonumber(app_cfg:match("_(%d+)%.lua$"))
+end
+
 local function load_app(app_list)
-    local conf
-    for dir in lfs.dir(run_root) do
-        local id = tonumber(dir:match("_(%d+)%.lua$"))
+    for f in lfs.dir(run_root) do
+        local id = app_id(f)
         if id then
             if app_list[id] then
                 log.error(text.dup_app, dir)
             else
-                local tpl, conf = validate_app(run_root.."/"..dir)
+                local tpl, conf = validate_app(run_root.."/"..f)
                 if tpl then
                     app_list[id] = { [tpl] = conf }
                 else
-                    log.error(text.invalid_meta, dir)
+                    log.error(text.invalid_app, f)
                 end
             end
         end
@@ -167,12 +206,6 @@ local cfg = {
     app_list = {},
     tpl_list = {}
 }
-
-local userpass
-local function init_auth()
-    cfg.auth.salt = crypt.randomkey()
-    userpass = crypt.hmac_sha1(cfg.auth.password, cfg.auth.salt)
-end
 
 local function load_all()
     pcall(lfs.mkdir, run_root)
@@ -191,38 +224,7 @@ local function load_all()
     load_tpl(cfg.tpl_list)
 end
 
-local function backup(from, to)
-    local f = io.open(from)
-    local conf = f:read("a")
-    f:close()
-
-    f = io.open(to, "w")
-    f:write(conf)
-    f:close()
-end
-
-local function save_cfg(file, key, conf)
-    local ok, err = pcall(function()
-        local t = {}
-        t[key] = conf
-        local str = dump_cfg(t)
-        local attr = lfs.attributes(file)
-        if attr then
-            backup(file, bak_file(file))
-        end
-        local f = io.open(file, "w")
-        f:write(str)
-        f:close()
-    end)
-    if ok then
-        log.error(text.config_update_suc, file)
-        return ok
-    else
-        log.error(text.config_update_fail, file, err)
-        return ok, err
-    end
-end
-
+local userpass
 local command = {}
 
 function command.auth(username, password)
@@ -231,14 +233,23 @@ function command.auth(username, password)
 end
 
 function command.save_app(id, tpl, conf)
-    local app_cfg = tpl.."_"..id
-    local ok, err = save_cfg(app_cfg, tpl, conf)
+    local f = app_cfg(id, tpl)
+    local ok, err = save_cfg(f, tpl, conf)
     if ok then
-        cfg["app_list"][id] = { [tpl] = conf }
+        cfg.app_list[id] = { [tpl] = conf }
         return ok
     else
         return ok, err
     end
+end
+
+function command.clean_app(id, tpl)
+    local f = app_cfg(id, tpl)
+    local attr = lfs.attributes(f)
+    if attr and attr.mode == "file" and attr.size ~= 0 then
+        os.remove(f)
+    end
+    cfg.app_list[id] = nil
 end
 
 function command.save_pipelist(list)
@@ -426,6 +437,11 @@ function command.upgrade(version)
     else
         return ok, ret
     end
+end
+
+local function init_auth()
+    cfg.auth.salt = crypt.randomkey()
+    userpass = crypt.hmac_sha1(cfg.auth.password, cfg.auth.salt)
 end
 
 local function launch()

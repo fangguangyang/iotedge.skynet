@@ -29,6 +29,7 @@ local text = {
         download_fail = "SW download failed",
         unzip_fail = "SW unzip failed",
         invalid_meta = "invalid SW metadata",
+        invalid_app = "invalid APP",
         tpl_replace = "APP template to be replaced",
         core_replace = "core to be replaced",
         install_fail = "new system install failed",
