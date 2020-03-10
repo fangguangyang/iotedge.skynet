@@ -58,7 +58,8 @@ local text = {
         app_in_use = "APP used by PIPE",
         loop = "endless loop detected",
         locked = "system in maintenance",
-        cleaned = "all configuration cleaned"
+        cleaned = "all configuration cleaned",
+        conf_fail = "configure failed",
     },
     gateway = {
         unknown_request = "unknown device or cmd",

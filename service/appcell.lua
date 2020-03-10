@@ -3,7 +3,7 @@ local api = require "api"
 local log = require "log"
 local text = require("text").app
 
-local tpl, name, gateway_addr, gateway_mqtt_addr = ...
+local tpl, id, gateway_addr, gateway_mqtt_addr = ...
 local command = {}
 
 local memlimit = require("sys").memlimit()
@@ -78,7 +78,7 @@ end})
 skynet.start(function()
     load_app()
     api.init(gateway_addr, gateway_mqtt_addr)
-    api.reg_dev(name, true)
+    api.reg_dev(id, true)
     skynet.dispatch("lua", function(_, _, cmd, ...)
         command[cmd](...)
     end)

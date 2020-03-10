@@ -140,16 +140,16 @@ local function validate_tpl(tpl_dir)
     return do_validate(".luac") or do_validate(".lua")
 end
 
-local function load_tpl(tpl_list)
+local function load_tpl(tpls)
     local conf
     for dir in lfs.dir(app_root) do
         if dir ~= "." and dir ~= ".." then
-            if tpl_list[dir] then
+            if tpls[dir] then
                 log.error(text.dup_tpl, dir)
             else
                 conf = validate_tpl(app_root.."/"..dir)
                 if conf then
-                    tpl_list[dir] = conf
+                    tpls[dir] = conf
                 else
                     log.error(text.invalid_meta, dir)
                 end
@@ -158,14 +158,13 @@ local function load_tpl(tpl_list)
     end
 end
 
-local function validate_app(app)
-    local attr = lfs.attributes(app)
+local function validate_app(app_cfg)
+    local attr = lfs.attributes(app_cfg)
     if attr and attr.mode == "file" and attr.size ~= 0 then
-        local app_conf = {}
-        load_cfg(app, app_conf)
-        local tpl, conf = next(app_conf)
-        if type(tpl) == "string" and type(conf) == "table" then
-            return tpl, conf
+        local env = {}
+        load_cfg(app_cfg, env)
+        if type(env.conf) == "table" then
+            return env.conf
         else
             return false
         end
@@ -175,23 +174,24 @@ local function validate_app(app)
 end
 
 local function app_cfg(id, tpl)
-    return run_root.."/"..tpl.."_"..id..".lua"
+    return run_root.."/"..tpl.."_"..id
 end
 
-local function app_id(app_cfg)
-    return tonumber(app_cfg:match("_(%d+)%.lua$"))
+local function app_id_tpl(id)
+    local tpl, i = id:match("^(.+)_(%d+)$")
+    return tonumber(i), tpl
 end
 
-local function load_app(app_list)
+local function load_app(apps)
     for f in lfs.dir(run_root) do
-        local id = app_id(f)
+        local id, tpl = app_id_tpl(f)
         if id then
-            if app_list[id] then
+            if apps[id] then
                 log.error(text.dup_app, dir)
             else
-                local tpl, conf = validate_app(run_root.."/"..f)
-                if tpl then
-                    app_list[id] = { [tpl] = conf }
+                local conf = validate_app(run_root.."/"..f)
+                if conf then
+                    apps[id] = { [tpl] = conf }
                 else
                     log.error(text.invalid_app, f)
                 end
@@ -202,26 +202,21 @@ end
 
 local cfg = {
     repo = false,
-    pipe_list = {},
-    app_list = {},
-    tpl_list = {}
+    pipes = {},
+    apps = {},
+    tpls = {}
 }
 
 local function load_all()
     pcall(lfs.mkdir, run_root)
     pcall(lfs.mkdir, app_root)
 
-    -- sys, gateway
     load_cfg(skynet.getenv("cfg"), cfg)
-    -- repo
     load_cfg(repo_cfg, cfg)
-    -- pipe_list
     load_cfg(pipe_cfg, cfg)
 
-    -- app_list
-    load_app(cfg.app_list)
-    -- tpl_list
-    load_tpl(cfg.tpl_list)
+    load_app(cfg.apps)
+    load_tpl(cfg.tpls)
 end
 
 local userpass
@@ -232,38 +227,42 @@ function command.auth(username, password)
     crypt.hmac_sha1(md5.sumhexa(password), cfg.auth.salt) == userpass
 end
 
-function command.save_app(id, tpl, conf)
+function command.update_app(id, tpl, conf)
     local f = app_cfg(id, tpl)
-    local ok, err = save_cfg(f, tpl, conf)
+    local ok, err = save_cfg(f, "conf", conf)
     if ok then
-        cfg.app_list[id] = { [tpl] = conf }
+        cfg.apps[id] = { [tpl] = conf }
         return ok
     else
         return ok, err
     end
 end
 
-function command.clean_app(id, tpl)
-    local f = app_cfg(id, tpl)
-    os.remove(f)
-    os.remove(bak_file(f))
-    cfg.app_list[id] = nil
+function command.remove_app(id)
+    local app = cfg.apps[id]
+    if app then
+        local tpl = next(app)
+        local f = app_cfg(id, tpl)
+        os.remove(f)
+        os.remove(bak_file(f))
+        cfg.apps[id] = nil
+    end
 end
 
-function command.save_pipelist(list)
-    local ok, err = save_cfg(pipe_cfg, "pipe_list", list)
+function command.update_pipelist(list)
+    local ok, err = save_cfg(pipe_cfg, "pipes", list)
     if ok then
-        cfg.pipe_list = list
+        cfg.pipes = list
         return ok
     else
         return ok, err
     end
 end
 
-function command.clean_pipelist()
+function command.remove_pipes()
     os.remove(pipe_cfg)
     os.remove(bak_file(pipe_cfg))
-    cfg.pipe_list = {}
+    cfg.pipes = {}
 end
 
 function command.get(key)
@@ -345,7 +344,7 @@ local function cluster_port()
 end
 
 local function total_conf()
-    return { repo = cfg.repo, apps = cfg.app_list, pipes = cfg.pipe_list }
+    return { repo = cfg.repo, apps = cfg.apps, pipes = cfg.pipe_list }
 end
 
 local function cluster_reload(c, port)

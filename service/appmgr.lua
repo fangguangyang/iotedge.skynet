@@ -34,7 +34,7 @@ local function clone(tpl, custom)
             if custom and custom[k] then
                 copy[k] = clone(v, custom[k])
             else
-                copy[k] = clone(v)
+                copy[k] = v
             end
         end
     else
@@ -47,34 +47,145 @@ local function clone(tpl, custom)
     return copy
 end
 
-local function save_app(id)
-    local app = applist[id]
-    skynet.call(sysmgr_addr, "lua", "save_app", id, app.app, app.conf)
+local function app_id(i, tpl)
+    return tpl.."_"..i
+end
+local function app_tpl(id)
+    return id:match("^(.+)_%d+$")
+end
+local function app_i(id)
+    return tonumber(id:match("^.+_(%d+)$"))
+end
+local function update_app(i, tpl, conf)
+    if type(i) == "string" then
+        skynet.call(sysmgr_addr, "lua", "update_app", app_i(i), tpl, conf)
+    else
+        skynet.call(sysmgr_addr, "lua", "update_app", i, tpl, conf)
+    end
+end
+local function remove_app(id)
+    skynet.send(applist[id].addr, "lua", "exit")
+    approute[id] = nil
+    applist[id] = nil
+    skynet.call(sysmgr_addr, "lua", "remove_app", app_i(id))
 end
 
-local function clean_app(id, tpl)
-    skynet.call(sysmgr_addr, "lua", "clean_app", id, tpl)
-end
-
-local function save_pipelist()
+local function update_pipelist()
     local list = {}
     for k, v in pairs(pipelist) do
         list[k] = {}
         list[k].auto = (v.start_time ~= false)
         list[k].apps = v.apps
     end
-    skynet.call(sysmgr_addr, "lua", "save_pipelist", list)
+    skynet.call(sysmgr_addr, "lua", "update_pipelist", list)
 end
 
-local function app_name(id, tpl)
-    return tpl.."_"..id
+local function set_repo(arg)
+    if type(arg) ~= "table" or
+        type(arg.uri) ~= "string" or
+        type(arg.auth) ~= "string" then
+        return false, text.invalid_arg
+    end
+    local ok, ret = skynet.call(sysmgr_addr, "lua", "set_repo", arg.uri, arg.auth)
+    if ok then
+        sysinfo.sys.repo = arg.uri
+        return true
+    else
+        return false, ret
+    end
 end
 
-local function app_tpl(name)
-    return name:match("_(%d+)$")
+local function validate_app(arg)
+    if type(arg) == "table" then
+        local tpl, conf = next(arg)
+        if type(tpl) == "string" and type(conf) == "table" then
+            return tpl, conf
+        else
+            return false
+        end
+    else
+        return false
+    end
 end
 
-local function load_app(id, tpl, conf)
+local function validate_conf(arg)
+    if type(arg) ~= "table" then
+        return false
+    end
+    if arg.repo then
+        local ok, err = set_repo(arg.repo)
+        if not ok then
+            return false
+        end
+    end
+    if type(arg.apps) == "table" and type(arg.pipes) == "table" then
+        for _, pipe in pairs(arg.pipes) do
+            if #pipe <= 1 then
+                return false
+            end
+            for _, id in pairs(pipe) do
+                if id == mqttappid then
+                    if not applist[id] then
+                        return false
+                    end
+                else
+                    if not validate_app(arg.apps[id]) then
+                        return false
+                    end
+                end
+            end
+        end
+    else
+        for _, app in pairs(arg) do
+            local id, conf = next(app)
+            if not applist[id] or type(conf) ~= "table" then
+                return false
+            end
+        end
+    end
+    return true
+end
+
+local function do_configure(arg, save)
+    if type(arg.apps) == "table" and type(arg.pipes) == "table" then
+        for i, app in pairs(arg.apps) do
+            local tpl, conf = next(app)
+            local ok, err = load_app(i, tpl, conf)
+            if ok then
+                if save then
+                    update_app(i, tpl, conf)
+                end
+            else
+                return ok, err
+            end
+        end
+
+        for id, pipe in pairs(arg.pipes) do
+            local ok, err = load_pipe(id, pipe)
+            if ok then
+                start_pipe(id)
+            else
+                return ok, err
+            end
+        end
+        if save then
+            update_pipelist()
+        end
+    else
+        for _, app in pairs(arg) do
+            local id, conf = next(app)
+            local tpl = app_tpl(id)
+            local full_conf = clone(tpllist[tpl], conf)
+            local a = applist[id]
+            skynet.send(a.addr, "lua", "conf", full_conf)
+            a.conf = conf
+            update_app(id, tpl, conf)
+        end
+    end
+    return true
+end
+
+local function load_app(i, tpl, conf)
     if not tpllist[tpl] then
         if type(tpl) ~= "string" or
             not tpl:match(regex.tpl_full_name) then
@@ -97,29 +208,29 @@ local function load_app(id, tpl, conf)
         end
     end
 
-    -- Borrow to reserve id
-    local name = app_name(id, tpl)
-    approute[name] = {}
-    local ok, addr = pcall(skynet.newservice, "appcell", tpl, name, gateway_addr, mqttapp)
+    local id = app_id(i, tpl)
+    -- to reserve id
+    approute[id] = {}
+    local ok, addr = pcall(skynet.newservice, "appcell", tpl, id, gateway_addr, mqttapp)
     if not ok then
-        approute[name] = nil
-        log.error(text.load_fail, name, addr)
+        approute[id] = nil
+        log.error(text.load_fail, id, addr)
         return false, text.load_fail
     end
 
     local full_conf = clone(tpllist[tpl], conf)
     skynet.send(addr, "lua", "conf", full_conf)
 
-    applist[name] = {
+    applist[id] = {
         addr = addr,
         load_time = api.datetime(),
         conf = conf
     }
     appmonitor[addr] = {
-        id = name,
+        id = id,
         counter = 0
     }
-    log.error(text.load_suc, id, tpl)
+    log.error(text.load_suc, id)
     return true
 end
 
@@ -196,25 +307,6 @@ local function load_sysapp()
     end
 end
 
-local function load_apps()
-    load_sysapp()
-    local apps = conf_get("app_list")
-    for id, app in pairs(apps) do
-        local tpl, conf = next(app)
-        load_app(id, tpl, conf)
-    end
-end
-
-local function load_pipes()
-    local pipes = conf_get("pipe_list")
-    for id, pipe in pairs(pipes) do
-        local ok, _ = load_pipe(id, pipe.apps)
-        if ok and pipe.auto then
-            start_pipe(id)
-        end
-    end
-end
-
 local cmd_desc = {
     mqttapp = true,
     clean = true,
@@ -223,7 +315,7 @@ local cmd_desc = {
     upgrade = "System upgrade: <string>",
     info = "Show system info",
     apps = "Show all APP template",
-    app_new = "New a APP: {app=<string>,conf={}}",
+    app_new = "New a APP: {<app>=<conf>}",
     app_remove = "Remove a APP: <id>",
     pipe_new = "New a PIPE: {<id>,<id>, ...}",
     pipe_remove = "Remove a PIPE: <id>",
@@ -240,13 +332,19 @@ end
 local function load_all()
     sysinfo.sys = conf_get("sys")
     sysinfo.sys.up = api.datetime(skynet.starttime())
-    local repo = conf_get("repo")
-    if repo then
-        sysinfo.sys.repo = repo.uri
+
+    load_sysapp()
+    tpllist = conf_get("tpls")
+
+    local total = {}
+    total.repo = conf_get("repo")
+    total.apps = conf_get("apps")
+    total.pipes = conf_get("pipes")
+    local ok, err = do_configure(total, false)
+    if not ok then
+        log.error(text.conf_fail, err)
     end
-    tpllist = conf_get("tpl_list")
-    load_apps()
-    load_pipes()
+
     api.init(gateway_addr, mqttapp)
     api.reg_dev("sys", true)
     reg_cmd()
@@ -270,18 +368,35 @@ function command.clean()
         stop_pipe(id)
     end
     pipelist = {}
-    skynet.call(sysmgr_addr, "lua", "clean_pipelist")
+    skynet.call(sysmgr_addr, "lua", "remove_pipes")
 
-    for id, app in pairs(applist) do
+    for id, _ in pairs(applist) do
         if id ~= mqttappid and id ~= wsappid then
-            skynet.send(app.addr, "lua", "exit")
-            approute[id] = nil
-            applist[id] = nil
-            clean_app(id)
+            remove_app(id)
         end
     end
     log.error(text.cleaned)
     return true
+end
+
+function command.configure(arg)
+    if locked then
+        return false, text.locked
+    end
+    locked = true
+    if validate_conf(arg) then
+        command.clean()
+        local ok, err = do_configure(arg, true)
+        locked = false
+        if ok then
+            return ok
+        else
+            return ok, err
+        end
+    else
+        locked = false
+        return false, text.invalid_arg
+    end
 end
 
 function command.upgrade(version)
@@ -304,21 +419,6 @@ function command.upgrade(version)
     return ok, ret
 end
 
-local function set_repo(arg)
-    if type(arg) ~= "table" or
-        type(arg.uri) ~= "string" or
-        type(arg.auth) ~= "string" then
-        return false, text.invalid_arg
-    end
-    local ok, ret = skynet.call(sysmgr_addr, "lua", "set_repo", arg.uri, arg.auth)
-    if ok then
-        sysinfo.sys.repo = arg.uri
-        return true
-    else
-        return false, ret
-    end
-end
-
 function command.set_repo(arg)
     if locked then
         return false, text.locked
@@ -338,53 +438,36 @@ function command.app_new(arg)
     if locked then
         return false, text.locked
     end
-    if type(arg) ~= "table" or
-        type(arg.app) ~= "string" then
+    local tpl, conf = validate_app(arg)
+    if not tpl then
         return false, text.invalid_arg
     end
-    local conf
-    if arg.conf then
-        if type(arg.conf) ~= "table" then
-            return false, text.invalid_arg
-        else
-            conf = arg.conf
-        end
-    else
-        conf = {}
-    end
-    local id = #approute + 1
-    local ok, ret = load_app(id, arg.app, conf)
+    local i = #approute+1
+    local ok, ret = load_app(i, tpl, conf)
     if ok then
-        save_app(app_name(id, tpl))
-        return true, id
+        update_app(i, tpl, conf)
+        return true
     else
         return false, ret
     end
 end
 
-function command.app_remove(idstr)
+function command.app_remove(id)
     if locked then
         return false, text.locked
     end
-    if not idstr or not tonumber(idstr) then
-        return false, text.invalid_arg
+    if id == mqttappid or id == wsappid then
+        return false, text.sysapp_remove
     end
-    local id = tonumber(idstr)
     local app = applist[id]
     if not app then
         return false, text.unknown_app
-    end
-    if id == mqttappid or id == wsappid then
-        return false, text.sysapp_remove
     end
     if next(approute[id]) ~= nil then
         return false, text.app_in_use
     end
 
-    skynet.send(app.addr, "lua", "exit")
-    applist[id] = nil
-    approute[id] = nil
-    clean_app(id)
+    remove_app(id)
     return true
 end
 
@@ -398,7 +481,7 @@ function command.pipe_new(apps)
     local id = #pipelist + 1
     local ok, ret = load_pipe(id, apps)
     if ok then
-        save_pipelist()
+        update_pipelist()
         return true, id
     else
         return false, ret
@@ -421,11 +504,11 @@ function command.pipe_remove(idstr)
         return false, text.pipe_running
     end
 
-    for _, appid in ipairs(pipelist[id].apps) do
+    for _, appid in pairs(pipelist[id].apps) do
         approute[appid][id] = nil
     end
     pipelist[id] = nil
-    save_pipelist()
+    update_pipelist()
     return true
 end
 
@@ -446,7 +529,7 @@ function command.pipe_start(idstr)
     end
 
     start_pipe(id)
-    save_pipelist()
+    update_pipelist()
     return true
 end
 
@@ -467,95 +550,7 @@ function command.pipe_stop(idstr)
     end
 
     stop_pipe(id)
-    save_pipelist()
-    return true
-end
-
-function command.configure(arg)
-    if locked then
-        return false, text.locked
-    end
-    if type(arg) ~= "table" then
-        return false, text.invalid_arg
-    end
-    locked = true
-
-    if arg.repo then
-        local ok, err = set_repo(arg.repo)
-        if not ok then
-            locked = false
-            return ok, err
-        end
-    end
-
-    if type(arg.apps) == "table" and type(arg.pipes) == "table" then
-        for _, pipe in ipairs(arg.pipes) do
-            if #pipe <= 1 then
-                locked = false
-                return false, text.invalid_arg
-            end
-            for _, id in ipairs(pipe) do
-                if id == mqttappid then
-                    if not applist[id] then
-                        locked = false
-                        return false, text.invalid_arg
-                    end
-                else
-                    local app = arg.apps[id]
-                    if type(app) == "table" then
-                        local tpl, conf = next(app)
-                        if type(tpl) ~= "string" or type(conf) ~= "table" then
-                            locked = false
-                            return false, text.invalid_arg
-                        end
-                    else
-                        locked = false
-                        return false, text.invalid_arg
-                    end
-                end
-            end
-        end
-        command.clean()
-
-        for id, app in ipairs(arg.apps) do
-            local tpl, conf = next(app)
-            local ok, err = load_app(id, tpl, conf)
-            if ok then
-                save_app(app_name(id))
-            else
-                locked = false
-                return ok, err
-            end
-        end
-
-        for id, pipe in ipairs(arg.pipes) do
-            local ok, err = load_pipe(id, pipe)
-            if ok then
-                start_pipe(id)
-            else
-                locked = false
-                return ok, err
-            end
-        end
-        save_pipelist()
-    else
-        for _, app in ipairs(arg) do
-            local id, conf = next(app)
-            if not applist[id] or type(conf) ~= "table" then
-                locked = false
-                return false, text.invalid_arg
-            end
-        end
-        for _, app in ipairs(arg) do
-            local id, conf = next(app)
-            local a = applist[id]
-            local full_conf = clone(tpllist[app_tpl[id]], conf)
-            skynet.send(a.addr, "lua", "conf", full_conf)
-            a.conf = conf
-            save_app(id)
-        end
-    end
-    locked = false
+    update_pipelist()
     return true
 end
 
