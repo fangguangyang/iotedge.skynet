@@ -114,11 +114,28 @@ end
 local function validate_repo(repo)
     if repo then
         if type(repo) ~= "table" or
-            type(repo.uri) ~= "string" or
-            type(repo.auth) ~= "string" then
+            type(repo.uri) ~= "string" then
             return false, text.invalid_arg
         end
-        local ok, ret = skynet.call(sysmgr_addr, "lua", "set_repo", repo.uri, repo.auth)
+        local auth
+        if type(repo.auth) == "string" then
+            local k, v = repo.auth:match("^([%g%s]+):([%g%s]+)$")
+            if k and v then
+                auth = { [k] = v }
+            else
+                return false, text.invalid_repo
+            end
+        elseif type(repo.auth) == "table" then
+            local k, v = next(repo.auth)
+            if type(k) == "string" and type(v) == "string" then
+                auth = repo.auth
+            else
+                return false, text.invalid_repo
+            end
+        else
+            return false, text.invalid_repo
+        end
+        local ok, ret = skynet.call(sysmgr_addr, "lua", "set_repo", repo.uri, auth)
         if ok then
             sysinfo.sys.repo = repo.uri
             --invalidate_info()
@@ -246,8 +263,9 @@ local function validate_conf(arg)
                 return ok, err
             end
         end
-    else
-        for i, app in pairs(arg) do
+    elseif type(arg.apps) == "table" then
+        local apps = arg.apps
+        for i, app in pairs(apps) do
             if type(app) ~= "table" then
                 return false, text.invalid_arg
             else
@@ -257,13 +275,15 @@ local function validate_conf(arg)
                 else
                     local tpl, id = validate_app_name(name)
                     if tpl then
-                        arg[i] = { [id] = conf }
+                        apps[i] = { [id] = conf }
                     else
                         return false, text.unknown_app
                     end
                 end
             end
         end
+    elseif not arg.repo then
+        return false, text.invalid_arg
     end
     return true
 end
@@ -377,14 +397,15 @@ local function do_configure(arg, save)
                 return ok, err
             end
         end
-    else
-        for _, app in pairs(arg) do
+    elseif type(arg.apps) == "table" then
+        local apps = arg.apps
+        for _, app in pairs(apps) do
             local id, conf = next(app)
             local a = applist[id]
             local full_conf = clone(tpllist[a.tpl], conf)
             skynet.send(a.addr, "lua", "conf", full_conf)
             a.conf = conf
-            update_app(id, tpl, conf)
+            update_app(id, a.tpl, conf)
         end
     end
     return true
@@ -437,16 +458,26 @@ local function load_all()
     sysinfo.sys = conf_get("sys")
     sysinfo.sys.cluster = nil
     sysinfo.sys.up = api.datetime(skynet.starttime())
+    local repo = conf_get("repo")
+    if repo then
+        sysinfo.sys.repo = repo.uri
+    else
+        sysinfo.sys.repo = false
+    end
 
     load_sysapp()
     tpllist = conf_get("tpls")
 
     local total = {}
-    total.repo = conf_get("repo")
     total.apps = conf_get("apps")
     total.pipes = conf_get("pipes")
-    local ok, err = do_configure(total, false)
-    if not ok then
+    local ok, err = validate_conf(total)
+    if ok then
+        ok, err = do_configure(total, false)
+        if not ok then
+            log.error(text.conf_fail, err)
+        end
+    else
         log.error(text.conf_fail, err)
     end
 
@@ -483,7 +514,9 @@ function command.configure(arg)
     locked = true
     local ok, err = validate_conf(arg)
     if ok then
-        command.clean()
+        if full_configure(arg) then
+            command.clean()
+        end
         local ok, err = do_configure(arg, true)
         locked = false
         if ok then

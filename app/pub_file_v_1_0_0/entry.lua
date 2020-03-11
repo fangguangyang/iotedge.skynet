@@ -19,6 +19,9 @@ function on_data(dev, data)
 end
 
 function on_conf(conf)
+    if f then
+        f:close()
+    end
     f = io.open(conf.file, "a")
 end
 

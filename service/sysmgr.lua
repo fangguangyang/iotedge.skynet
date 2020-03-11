@@ -320,14 +320,9 @@ function command.install_tpl(name)
 end
 
 function command.set_repo(uri, auth)
-    local k, v = auth:match("^([%g%s]+):([%g%s]+)$")
-    if not k or not v then
-        return false, text.invalid_auth
-    end
-    local a = { [k] = v }
-    local ok = http.get(uri, a)
+    local ok = http.get(uri, auth)
     if ok then
-        local conf = {uri=uri, auth=a}
+        local conf = { uri = uri, auth = auth }
         ok, err = save_cfg(repo_cfg, "repo", conf)
         if ok then
             cfg.repo = conf
@@ -345,7 +340,7 @@ local function cluster_port()
 end
 
 local function total_conf()
-    return { repo = cfg.repo, apps = cfg.apps, pipes = cfg.pipe_list }
+    return { repo = cfg.repo, apps = cfg.apps, pipes = cfg.pipes }
 end
 
 local function cluster_reload(c, port)
