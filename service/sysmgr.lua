@@ -266,8 +266,16 @@ function command.update_pipes(list)
     end
 end
 
+local function total_conf()
+    return { repo = cfg.repo, apps = cfg.apps, pipes = cfg.pipes }
+end
+
 function command.get(key)
-    return cfg[key]
+    if key == "total" then
+        return total_conf()
+    else
+        return cfg[key]
+    end
 end
 
 function command.install_tpl(name)
@@ -339,10 +347,6 @@ local function cluster_port()
     return cfg.sys.cluster
 end
 
-local function total_conf()
-    return { repo = cfg.repo, apps = cfg.apps, pipes = cfg.pipes }
-end
-
 local function cluster_reload(c, port)
     local n = "iotedge"
     c.reload({ [n] = "127.0.0.1:"..port })
@@ -403,7 +407,7 @@ function command.upgrade(version)
                 mqtt_uri = cfg.gateway_mqtt.uri
             end
 
-            local current_conf = total_conf()
+            local current_conf = skynet.unpack(skynet.pack(total_conf()))
             skynet.call(cfg.appmgr, "lua", "clean")
             skynet.send(cfg.gateway_console, "lua", "stop")
             skynet.send(cfg.gateway_ws, "lua", "stop")
@@ -411,7 +415,7 @@ function command.upgrade(version)
             if cfg.gateway_mqtt then
                 skynet.send(cfg.gateway_mqtt_addr, "lua", "stop")
             end
-            skynet.sleep(200)
+            skynet.sleep(500)
 
             local c_dir = lfs.currentdir()
             lfs.chdir(t_dir)
@@ -428,6 +432,8 @@ function command.upgrade(version)
             else
                 log.error(text.configure_fail, err)
             end
+
+            skynet.sleep(100)
             sys.quit()
             end)
         return ok

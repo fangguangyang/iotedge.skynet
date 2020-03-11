@@ -37,6 +37,7 @@ local text = {
     appmgr = {
         unknown_cmd = "unknown command",
         invalid_arg = "invalid argument",
+        invalid_conf = "invalid configuration",
         invalid_version = "invalid system version",
         dup_upgrade_version = "system version same as current",
         invalid_repo = "SW repository not set",

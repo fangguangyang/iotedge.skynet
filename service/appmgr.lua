@@ -22,20 +22,19 @@ local appmonitor = {}
 local command = {}
 
 local function clone(tpl, custom)
-    local copy
     if type(tpl) == "table" then
-        copy = {}
+        local copy = {}
         for k, v in pairs(tpl) do
-            if custom and custom[k] then
+            if custom[k] then
                 copy[k] = clone(v, custom[k])
             else
                 copy[k] = v
             end
         end
+        return copy
     else
-        copy = custom
+        return custom
     end
-    return copy
 end
 
 local function sysapp(id)
@@ -217,22 +216,45 @@ local function install_tpl(tpl)
         end
     end
 end
-local function validate_app(arg)
-    if type(arg) == "table" then
+local function validate_app(arg, existing)
+    if type(arg) ~= "table" then
+        return false, text.invalid_arg
+    end
+    if existing then
+        local name, conf = next(arg)
+        if type(conf) == "table" then
+            local tpl, id = validate_app_name(name)
+            if tpl then
+                local ok, full_conf = pcall(clone, tpllist[tpl], conf)
+                if ok then
+                    return id, full_conf
+                else
+                    return false, text.invalid_conf
+                end
+            else
+                return false, text.unknown_app
+            end
+        else
+            return false, text.invalid_arg
+        end
+    else
         local tpl, conf = next(arg)
         if type(tpl) == "string" and tpl:match("^[%l%d_]+_v_[%d_]+$") and
             type(conf) == "table" then
             local ok, err = install_tpl(tpl)
             if ok then
-                return tpl, conf
+                local ok, full_conf = pcall(clone, tpllist[tpl], conf)
+                if ok then
+                    return tpl, full_conf
+                else
+                    return false, text.invalid_conf
+                end
             else
                 return false, err
             end
         else
             return false, text.invalid_arg
         end
-    else
-        return false, text.invalid_arg
     end
 end
 
@@ -257,29 +279,23 @@ local function validate_conf(arg)
                 return ok, err
             end
         end
-        for _, app in pairs(arg.apps) do
-            local ok, err = validate_app(app)
-            if not ok then
-                return ok, err
+        local apps = arg.apps
+        for id, app in pairs(apps) do
+            local tpl, full_conf = validate_app(app)
+            if tpl then
+                app[tpl] = full_conf
+            else
+                return tpl, full_conf
             end
         end
     elseif type(arg.apps) == "table" then
         local apps = arg.apps
         for i, app in pairs(apps) do
-            if type(app) ~= "table" then
-                return false, text.invalid_arg
+            local id, full_conf = validate_app(app, true)
+            if id then
+                apps[i] = { [id] = full_conf }
             else
-                local name, conf = next(app)
-                if type(conf) ~= "table" then
-                    return false, text.invalid_arg
-                else
-                    local tpl, id = validate_app_name(name)
-                    if tpl then
-                        apps[i] = { [id] = conf }
-                    else
-                        return false, text.unknown_app
-                    end
-                end
+                return id, full_conf
             end
         end
     elseif not arg.repo then
@@ -299,8 +315,7 @@ local function load_app(id, tpl, conf)
         return false, text.load_fail
     end
 
-    local full_conf = clone(tpllist[tpl], conf)
-    skynet.send(addr, "lua", "conf", full_conf)
+    skynet.send(addr, "lua", "conf", conf)
 
     applist[id] = {
         addr = addr,
@@ -375,8 +390,8 @@ end
 local function do_configure(arg, save)
     if full_configure(arg) then
         for id, app in pairs(arg.apps) do
-            local tpl, conf = next(app)
-            local ok, err = load_app(id, tpl, conf)
+            local tpl, full_conf = next(app)
+            local ok, err = load_app(id, tpl, full_conf)
             if ok then
                 if save then
                     update_app(id, tpl, conf)
@@ -400,11 +415,10 @@ local function do_configure(arg, save)
     elseif type(arg.apps) == "table" then
         local apps = arg.apps
         for _, app in pairs(apps) do
-            local id, conf = next(app)
+            local id, full_conf = next(app)
             local a = applist[id]
-            local full_conf = clone(tpllist[a.tpl], conf)
             skynet.send(a.addr, "lua", "conf", full_conf)
-            a.conf = conf
+            a.conf = full_conf
             update_app(id, a.tpl, conf)
         end
     end
@@ -458,19 +472,12 @@ local function load_all()
     sysinfo.sys = conf_get("sys")
     sysinfo.sys.cluster = nil
     sysinfo.sys.up = api.datetime(skynet.starttime())
-    local repo = conf_get("repo")
-    if repo then
-        sysinfo.sys.repo = repo.uri
-    else
-        sysinfo.sys.repo = false
-    end
+    sysinfo.sys.repo = false
 
     load_sysapp()
     tpllist = conf_get("tpls")
 
-    local total = {}
-    total.apps = conf_get("apps")
-    total.pipes = conf_get("pipes")
+    local total = conf_get("total")
     local ok, err = validate_conf(total)
     if ok then
         ok, err = do_configure(total, false)
@@ -561,12 +568,12 @@ function command.app_new(arg)
     if locked then
         return false, text.locked
     end
-    local tpl, conf = validate_app(arg)
+    local tpl, full_conf = validate_app(arg)
     if not tpl then
         return tpl, conf
     end
     local id = #applist+1
-    local ok, ret = load_app(id, tpl, conf)
+    local ok, ret = load_app(id, tpl, full_conf)
     if ok then
         update_app(id, tpl, conf)
         return true
