@@ -10,8 +10,8 @@ local text = require("text").sysmgr
 
 local app_root = "./app"
 local run_root = "./run"
-local repo_cfg = run_root.."/repo.lua"
-local pipe_cfg = run_root.."/pipe.lua"
+local repo_cfg = run_root.."/repo"
+local pipe_cfg = run_root.."/pipe"
 local meta_lua = "meta"
 local entry_lua = "entry"
 local gateway_global = "iotedge-gateway"
@@ -177,15 +177,15 @@ local function app_cfg(id, tpl)
     return run_root.."/"..tpl.."_"..id
 end
 
-local function app_id_tpl(id)
-    local tpl, i = id:match("^(.+)_(%d+)$")
-    return tonumber(i), tpl
+local function app_id_tpl(f)
+    local tpl, id = f:match("^(.+)_(%d+)$")
+    return tonumber(id), tpl
 end
 
 local function load_app(apps)
     for f in lfs.dir(run_root) do
         local id, tpl = app_id_tpl(f)
-        if id then
+        if id and tpl then
             if apps[id] then
                 log.error(text.dup_app, dir)
             else
@@ -228,41 +228,42 @@ function command.auth(username, password)
 end
 
 function command.update_app(id, tpl, conf)
-    local f = app_cfg(id, tpl)
-    local ok, err = save_cfg(f, "conf", conf)
-    if ok then
-        cfg.apps[id] = { [tpl] = conf }
-        return ok
-    else
-        return ok, err
-    end
-end
-
-function command.remove_app(id)
-    local app = cfg.apps[id]
-    if app then
-        local tpl = next(app)
+    if conf then
         local f = app_cfg(id, tpl)
-        os.remove(f)
-        os.remove(bak_file(f))
-        cfg.apps[id] = nil
-    end
-end
-
-function command.update_pipelist(list)
-    local ok, err = save_cfg(pipe_cfg, "pipes", list)
-    if ok then
-        cfg.pipes = list
-        return ok
+        local ok, err = save_cfg(f, "conf", conf)
+        if ok then
+            cfg.apps[id] = { [tpl] = conf }
+            return ok
+        else
+            return ok, err
+        end
     else
-        return ok, err
+        local app = cfg.apps[id]
+        if app then
+            local f = app_cfg(id, tpl)
+            os.remove(f)
+            os.remove(bak_file(f))
+            cfg.apps[id] = nil
+            log.error(text.config_removed, f)
+        end
     end
 end
 
-function command.remove_pipes()
-    os.remove(pipe_cfg)
-    os.remove(bak_file(pipe_cfg))
-    cfg.pipes = {}
+function command.update_pipes(list)
+    if next(list) then
+        local ok, err = save_cfg(pipe_cfg, "pipes", list)
+        if ok then
+            cfg.pipes = list
+            return ok
+        else
+            return ok, err
+        end
+    else
+        os.remove(pipe_cfg)
+        os.remove(bak_file(pipe_cfg))
+        cfg.pipes = {}
+        log.error(text.config_removed, pipe_cfg)
+    end
 end
 
 function command.get(key)

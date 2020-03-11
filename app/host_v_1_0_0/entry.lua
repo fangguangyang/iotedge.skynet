@@ -6,7 +6,7 @@ local host = "iotedge-host"
 local post
 
 local cmd_desc = {
-    host_status = "Show host status"
+    status = "Show host status"
 }
 
 local function reg_cmd()
@@ -29,7 +29,7 @@ local function fetch_mem()
     end
 end
 
-function host_status(dev)
+function status(dev)
     return dev.." is running"
 end
 

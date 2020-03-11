@@ -106,11 +106,7 @@ local function handle_connect(connack, cli)
     log.error(log_prefix, "connected")
     ensure_subscribe(cli, rpc_topic, rpc_qos)
 
-    local info = {
-        conf = { uri = sys_uri, id = sys_name },
-        app = sys_app
-    }
-    skynet.call(gateway_addr, "lua", "sys", "mqttapp", info)
+    skynet.call(gateway_addr, "lua", "sys", "mqttapp", { uri = sys_uri, id = sys_name })
 
     local check_timeout = keepalive_timeout+100
     local function ping()
