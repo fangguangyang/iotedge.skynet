@@ -349,13 +349,13 @@ local function cluster_reload(c, port)
     return n
 end
 
-local function configure(port)
+local function configure(port, conf)
     local peer = cluster_reload(cluster, port)
     local g = "@"..gateway_global
 
     local info, err = cluster.call(peer, g, "sys", "info")
     if info then
-        local ok, err = cluster.call(peer, g, "sys", "configure", total_conf())
+        local ok, err = cluster.call(peer, g, "sys", "configure", conf)
         if ok then
             return ok
         else
@@ -403,6 +403,7 @@ function command.upgrade(version)
                 mqtt_uri = cfg.gateway_mqtt.uri
             end
 
+            local current_conf = total_conf()
             skynet.call(cfg.appmgr, "lua", "clean")
             skynet.send(cfg.gateway_console, "lua", "stop")
             skynet.send(cfg.gateway_ws, "lua", "stop")
@@ -421,7 +422,7 @@ function command.upgrade(version)
             end
 
             skynet.sleep(500)
-            local ok, err = pcall(configure, cluster)
+            local ok, err = pcall(configure, cluster, current_conf)
             if ok then
                 log.error(text.sys_exit)
             else
