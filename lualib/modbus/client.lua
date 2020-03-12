@@ -259,7 +259,10 @@ end
 local client = {}
 function client.new_tcp(conf)
     local le = conf.le or false
-    local timeout = conf.timeout or 50 -- 0.5s
+    local timeout = conf.timeout // 10
+    if timeout == 0 then
+        timeout = 50 -- 0.5s
+    end
     local packfunc, unpackfunc
     if le then
         packfunc = madu.pack_tcp_le
@@ -309,7 +312,10 @@ end
 local function new_rtu(ch, conf)
     local le = conf.le or false
     local ascii = conf.ascii or false
-    local timeout = conf.timeout or 50 -- 0.5s
+    local timeout = conf.timeout // 10
+    if timeout == 0 then
+        timeout = 50 -- 0.5s
+    end
     local packfunc, unpackfunc
     if le then
         if ascii then
@@ -352,8 +358,8 @@ function client.new_rtu(conf)
         databits = conf.databits,
         parity = conf.parity,
         stopbits = conf.stopbits,
-        r_timeout = conf.timeout * 10, -- 500ms
-        b_timeout = 500*1000, -- 500ms
+        r_timeout = conf.r_timeout, -- ms
+        b_timeout = conf.b_timeout * 1000, -- us
         rtscts = conf.rtscts
     }
     return new_rtu(ch, conf)

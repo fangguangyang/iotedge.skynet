@@ -69,8 +69,7 @@ function write_register(arg)
     return cli:request(arg.slave, p)
 end
 
-function on_conf(conf)
-    reg_cmd()
+local function config_transport(t)
     local mode = conf.mode
     local arg
     if conf.le then
@@ -97,5 +96,12 @@ function on_conf(conf)
         cli = client.new_tcp(arg)
     else
         log.error(text.conf_fail)
+    end
+end
+
+function on_conf(conf)
+    reg_cmd()
+    if conf.transport then
+        config_transport(conf.transport)
     end
 end

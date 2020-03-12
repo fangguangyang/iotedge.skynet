@@ -14,11 +14,11 @@ local function do_dump(pf, info)
         local prefix = string.rep(" ", indent*2)
         for k, v in pairs(t) do
             if type(v) == "table" then
-                if next(v) == nil then
-                    pf(prefix..tostring(k)..": {}")
-                else
+                if next(v) then
                     pf(prefix..tostring(k)..":")
                     dump_table(v, indent+1)
+                else
+                    pf(prefix..tostring(k)..": {}")
                 end
             else
                 pf(prefix..tostring(k)..": "..tostring(v))
