@@ -267,9 +267,11 @@ local function validate_conf(arg)
         return false, text.invalid_arg
     end
 
-    local ok, err = validate_repo(arg.repo)
-    if not ok then
-        return ok, err
+    if arg.repo then
+        local ok, err = validate_repo(arg.repo)
+        if not ok then
+            return ok, err
+        end
     end
 
     if full_configure(arg) then
@@ -394,7 +396,7 @@ local function do_configure(arg, save)
             local ok, err = load_app(id, tpl, full_conf)
             if ok then
                 if save then
-                    update_app(id, tpl, conf)
+                    update_app(id, tpl, full_conf)
                 end
             else
                 return ok, err
@@ -419,7 +421,7 @@ local function do_configure(arg, save)
             local a = applist[id]
             skynet.send(a.addr, "lua", "conf", full_conf)
             a.conf = full_conf
-            update_app(id, a.tpl, conf)
+            update_app(id, a.tpl, full_conf)
         end
     end
     return true
@@ -575,7 +577,7 @@ function command.app_new(arg)
     local id = #applist+1
     local ok, ret = load_app(id, tpl, full_conf)
     if ok then
-        update_app(id, tpl, conf)
+        update_app(id, tpl, full_conf)
         return true
     else
         return false, ret

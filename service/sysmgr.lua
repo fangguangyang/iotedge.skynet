@@ -3,6 +3,7 @@ local cluster = require "skynet.cluster"
 local crypt = require "skynet.crypt"
 local md5 =	require	"md5"
 local lfs = require "lfs"
+local dump = require "utils.dump"
 local http = require "utils.http"
 local log = require "log"
 local sys = require "sys"
@@ -15,50 +16,6 @@ local pipe_cfg = run_root.."/pipe"
 local meta_lua = "meta"
 local entry_lua = "entry"
 local gateway_global = "iotedge-gateway"
-
-local function print_k(key)
-    if type(key) == "number" then
-        return "["..key.."] = "
-    else
-        if key:match("^%d.*") or key:match("[^_%w]+") then
-            return "['"..key.."'] = "
-        else
-            return key.." = "
-        end
-    end
-end
-
-local function print_v(value)
-    if type(value) == "boolean" or type(value) == "number" then
-        return tostring(value)
-    else
-        return "'"..value.."'"
-    end
-end
-
-local tinsert = table.insert
-local srep = string.rep
-local function dump_cfg(conf)
-    local lines = {}
-    local function dump_table(t, indent)
-        local prefix = srep(' ', indent*4)
-        for k, v in pairs(t) do
-            if type(v) == "table" then
-                tinsert(lines, prefix..print_k(k)..'{')
-                dump_table(v, indent+1)
-                if indent == 0 then
-                    tinsert(lines, prefix..'}')
-                else
-                    tinsert(lines, prefix..'},')
-                end
-            else
-                tinsert(lines, prefix..print_k(k)..print_v(v)..',')
-            end
-        end
-    end
-    dump_table(conf, 0)
-    return table.concat(lines, '\n')
-end
 
 local function backup(from, to)
     local f = io.open(from)
@@ -78,7 +35,7 @@ local function save_cfg(file, key, conf)
     local ok, err = pcall(function()
         local t = {}
         t[key] = conf
-        local str = dump_cfg(t)
+        local str = dump(t)
         local attr = lfs.attributes(file)
         if attr then
             backup(file, bak_file(file))
