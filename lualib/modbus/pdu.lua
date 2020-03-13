@@ -237,16 +237,20 @@ local u_le = {
 }
 
 local pdu = {}
-function pdu.pack_be(fc, ...)
-    local f = p_be[fc]
-    assert(f, err.unknown_fc)
-    return f(fc, ...)
-end
-
-function pdu.pack_le(fc, ...)
-    local f = p_le[fc]
-    assert(f, err.unknown_fc)
-    return f(fc, ...)
+function pdu.pack(le)
+    if le then
+        return function(fc, ...)
+            local f = p_le[fc]
+            assert(f, err.unknown_fc)
+            return f(fc, ...)
+        end
+    else
+        return function(fc, ...)
+            local f = p_be[fc]
+            assert(f, err.unknown_fc)
+            return f(fc, ...)
+        end
+    end
 end
 
 function pdu.unpack_be(fc, data)

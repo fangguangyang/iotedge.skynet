@@ -157,20 +157,23 @@ function api.cov_post(dev, data)
     end
 end
 
-function api.batch_post(size)
-    if type(size) == "number" and size <= 200 then
-        return function(dev, data)
-            if appname and devlist[dev] and
-                type(data) == "table" and next(data) then
-                local p = api.pack_data(data)
-                local b = devlist[dev].buffer
-                table.move(p, 1, #p, #b+1, b)
-                if #b >= size then
-                    raw_post(dev, b)
-                    devlist[dev].buffer = {}
-                end
-            end
+local function batch(dev, data)
+    if appname and devlist[dev] and
+        type(data) == "table" and next(data) then
+        local p = api.pack_data(data)
+        local b = devlist[dev].buffer
+        table.move(p, 1, #p, #b+1, b)
+        if #b >= devlist[dev].size then
+            raw_post(dev, b)
+            devlist[dev].buffer = {}
         end
+    end
+end
+
+function api.batch_post(dev, size)
+    if type(size) == "number" and size <= 200 and devlist[dev] then
+        devlist[dev].size = size
+        return batch
     else
         return false
     end

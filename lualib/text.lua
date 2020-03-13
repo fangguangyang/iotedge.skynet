@@ -12,7 +12,12 @@ local text = {
         no_conf_handler = "no conf handler",
         no_data_handler = "no data handler",
         conf_fail = "configure failed",
-        pack_fail = "pack failed"
+        conf_device_fail = "configure devices failed",
+        pack_fail = "pack failed",
+        unpack_fail = "unpack failed",
+        poll_fail = "fetch data failed",
+        invalid_resp = "invalid device",
+        exception = "exception raised"
     },
     sysmgr = {
         unknown_cmd = "unknown command",
