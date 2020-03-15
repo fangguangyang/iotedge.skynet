@@ -89,6 +89,8 @@ local function console_main_loop(fd)
             if cmdline:match(regex.valid_cmd) then
                 local ok, ret = docmd(cmdline)
                 if ok == true then
+                    print(ok)
+                    print(ret)
                     if ret ~= nil then
                         dump(ret)
                     else

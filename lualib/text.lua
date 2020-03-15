@@ -15,9 +15,20 @@ local text = {
         conf_device_fail = "configure devices failed",
         pack_fail = "pack failed",
         unpack_fail = "unpack failed",
-        poll_fail = "fetch data failed",
-        invalid_resp = "invalid device",
-        exception = "exception raised"
+        req_fail = "fetch data failed",
+        invalid_device_conf = "invalid device configuration",
+        invalid_tag_conf = "invalid tag configuration",
+        invalid_arg = "invalid argument",
+        invalid_dev = "invalid device",
+        invalid_tag = "invalid tag",
+        read_only = "read-only tag",
+        invalid_unit = "invalid device of response",
+        invalid_num = "invalid number of response",
+        invalid_fc = "invalid function code of response",
+        invalid_addr = "invalid addr of response",
+        invalid_write, "invalid write",
+        exception = "exception raised",
+        not_online = "device not online"
     },
     sysmgr = {
         unknown_cmd = "unknown command",
@@ -84,7 +95,9 @@ local text = {
         max = "Max connection reached",
         username = "Username: ",
         password = "Password: ",
-        closed = "Connection closed"
+        closed = "Connection closed",
+        ok = "OK",
+        nok = "Error"
     },
     mqtt = {
         invalid_req = "invalid request received",

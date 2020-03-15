@@ -45,11 +45,11 @@ local function validate_addr(addr)
 end
 local function validate_bit_number(n)
     local i_n = math.tointeger(n)
-    assert(i_n and i_n > 0 and i_n < MODBUS_MAX_READ_BITS, err.invalid_number)
+    assert(i_n and i_n > 0 and i_n <= MODBUS_MAX_READ_BITS, err.invalid_number)
 end
 local function validate_reg_number(n)
     local i_n = math.tointeger(n)
-    assert(i_n and i_n > 0 and i_n < MODBUS_MAX_READ_REGISTERS, err.invalid_number)
+    assert(i_n and i_n > 0 and i_n <= MODBUS_MAX_READ_REGISTERS, err.invalid_number)
 end
 local function validate_bit_val(val)
     assert(type(val) == "boolean", err.invalid_value)
@@ -59,13 +59,13 @@ local function validate_reg_val(val)
     assert(i_val and i_val >= MODBUS_REG_MIN and i_val <= MODBUS_REG_MAX, err.invalid_value)
 end
 local function validate_bit_table(t)
-    assert(#t > 0 and #t < MODBUS_MAX_WRITE_BITS, err.invalid_number)
+    assert(#t > 0 and #t <= MODBUS_MAX_WRITE_BITS, err.invalid_number)
     for _, v in ipairs(t) do
         validate_bit_val(v)
     end
 end
 local function validate_reg_table(t)
-    assert(#t > 0 and #t < MODBUS_MAX_WRITE_REGISTERS, err.invalid_number)
+    assert(#t > 0 and #t <= MODBUS_MAX_WRITE_REGISTERS, err.invalid_number)
     for _, v in ipairs(t) do
         validate_reg_val(v)
     end

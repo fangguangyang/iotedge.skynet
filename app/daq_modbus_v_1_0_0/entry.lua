@@ -1,34 +1,29 @@
+local skynet = require "skynet"
 local log = require "log"
 local text = require("text").app
 local api = require "api"
 local client = require "modbus.client"
 local mpdu = require "modbus.pdu"
 local mdata = require "modbus.data"
-local basexx = require "utils.basexx"
-local skynet = require "skynet"
 
 local tblins = table.insert
+local strfmt = string.format
+
+local MODBUS_SLAVE_MIN = 1
+local MODBUS_SLAVE_MAX = 247
 
 local cli
-local pack
+local cli_pack
 local registered = false
 local running = false
 local max_poll = 100 * 60 -- 1 min
 local devlist = {}
 
 local cmd_desc = {
-    read_coin = "{ slave=<s>,addr=<a>,number=<n> }",
-    read_input = "{ slave=<s>,addr=<a>,number=<n> }",
-    read_holding_register = "{ slave=<s>,addr=<a>,number=<n> }",
-    read_input_register = "{ slave=<s>,addr=<a>,number=<n> }",
-    write_coin = "{ slave=<s>,addr=<a>,value=<v>/{} }",
-    write_register = "{ slave=<s>,addr=<a>,value=<v>/{} }"
+    read = "<tag>",
+    write = "{<tag>,<val>}",
+    list = "list tags"
 }
-
-local function hex_dump(buf)
-    print(basexx.to_hex(buf))
-    io.write('\n')
-end
 
 local function reg_cmd()
     for k, v in pairs(cmd_desc) do
@@ -36,82 +31,105 @@ local function reg_cmd()
     end
 end
 
-function read_coin(arg)
+function list(dev)
     if cli then
-        local p = pack(1, arg.addr, arg.number)
-        return cli:request(arg.slave, p)
-    else
-        return false
-    end
-end
-
-function read_input(arg)
-    if cli then
-        local p = pack(2, arg.addr, arg.number)
-        return cli:request(arg.slave, p)
-    else
-        return false
-    end
-end
-
-function read_holding_register(arg)
-    if cli then
-        local p = pack(3, arg.addr, arg.number)
-        return cli:request(arg.slave, p)
-    else
-        return false
-    end
-end
-
-function read_input_register(arg)
-    if cli then
-        local p = pack(4, arg.addr, arg.number)
-        return cli:request(arg.slave, p)
-    else
-        return false
-    end
-end
-
-function write_coin(arg)
-    if cli then
-        local p
-        if type(arg.value) == "table" then
-            p = pack(15, arg.addr, arg.value)
+        local d = devlist[dev]
+        if d then
+            if not d.help then
+                local h = {
+                    unitid = d.unitid,
+                    write = {},
+                    read = {}
+                }
+                for name, t in pairs(d.tags) do
+                    if t.read then
+                        h.read[name] = {
+                            fc = t.fc,
+                            dtype = t.dt,
+                            addr = t.addr,
+                            number = t.number
+                        }
+                    end
+                    if t.write then
+                        h.write[name] = {
+                            fc = t.wfc,
+                            dtype = t.dt,
+                            addr = t.addr,
+                            number = t.number
+                        }
+                    end
+                end
+                d.help = h
+            end
+            return d.help
         else
-            p = pack(5, arg.addr, arg.value)
+            return false, text.invalid_dev
         end
-        return cli:request(arg.slave, p)
     else
-        return false
+        return false, text.not_online
     end
 end
 
-function write_register(arg)
+function read(dev, tag)
     if cli then
-        local p
-        if type(arg.value) == "table" then
-            p = pack(16, arg.addr, arg.value)
-        else
-            p = pack(6, arg.addr, arg.value)
-        end
-        return cli:request(arg.slave, p)
+        return pcall(function()
+            local u = assert(devlist[dev].unitid, text.invalid_dev)
+            local t = assert(devlist[dev].tags[tag], text.invalid_tag)
+
+            -- all tag can be read, no check here
+            local ok, ret = cli:request(u, t.read)
+            assert(ok, strfmt("%s:%s", text.req_fail, ret))
+            local uid = ret[1]
+            assert(uid==u, strfmt("%s:%s:%s", text.invalid_unit, u, uid))
+            local fc = ret[2]
+            assert(fc==t.fc, strfmt("%s:%s:%s", text.invalid_fc, t.fc, fc))
+            local data = ret[3]
+            assert(type(data)=="table", strfmt("%s:%s", text.exception, data))
+            if t.fc == 3 or t.fc == 4 then
+                local n = #data
+                assert(n==t.number, strfmt("%s:%s:%s", text.invalid_num, t.number, n))
+            end
+            return t.unpack(1, data)
+        end)
     else
-        return false
+        return false, text.not_online
     end
 end
 
-local function unregdev()
-    for _, d in pairs(devlist) do
-        api.unreg_dev(d)
-    end
-    devlist = {}
-end
+function write(dev, arg)
+    if cli then
+        return pcall(function()
+            local u = assert(devlist[dev].unitid, text.invalid_dev)
+            assert(type(arg) == "table", text.invalid_arg)
+            local tag = arg[1]
+            assert(type(tag) == "string", text.invalid_arg)
+            local val = arg[2]
+            assert(type(val) == "number" or
+                type(val) == "boolean" or
+                type(val) == "string", text.invalid_arg)
+            local t = assert(devlist[dev].tags[tag], text.invalid_tag)
+            local w = assert(t.write, text.read_only)
+            local p = assert(w(val), strfmt("%s", text.pack_fail))
 
-local function stop()
-    if running then
-        running = false
-        unregdev()
-        skynet.sleep(max_poll)
+            local ok, ret = cli:request(u, p)
+            assert(ok, strfmt("%s:%s", text.req_fail, ret))
+            local uid = ret[1]
+            assert(uid==u, strfmt("%s:%s:%s", text.invalid_unit, u, uid))
+            local fc = ret[2]
+            assert(fc==t.wfc, strfmt("%s:%s:%s", text.invalid_fc, t.wfc, fc))
+            local addr = ret[3]
+            local data = ret[4]
+            assert(data ~= nil, strfmt("%s:%s", text.exception, addr))
+            assert(addr==t.addr, strfmt("%s:%s:%s", text.invalid_addr, t.addr, addr))
+            if fc == 5 or fc == 6 then
+                local v = t.unpack(1, {data})
+                assert(val==v, strfmt("%s:%s:%s", text.invalid_write, val, v))
+            else
+                assert(data==t.number, strfmt("%s:%s:%s", text.invalid_num, t.number, data))
+            end
+        end)
+    else
+        return false, text.not_online
     end
 end
 
@@ -137,105 +155,173 @@ local function post_function(dname, dconf, tconf)
     end
 end
 
-local function make_poll(interval, dname, unitid, fc, addr, number, tags, postfunc)
-    local p = pack(fc, addr, number)
-    local log_prefix = string.format("%s(%d): %d, %d(%d)", dname, unitid, fc, addr, number)
-    local poll = function()
-        local ok, ret = cli:request(unitid, p)
-        if ok then
-            local uid = ret[1]
-            local data = ret[2]
-            if uid == unitid then
-                if type(data) ~= "table" then
-                    log.error(log_prefix, text.exception, tostring(data))
-                elseif #data ~= number then
-                    log.error(log_prefix, text.invalid_resp, "number", tostring(#data))
-                else
-                    local list = {}
-                    for name, unpack in pairs(tags) do
-                        local ok, v = pcall(unpack, data)
-                        if ok then
-                            tblins(list, { name = v })
-                        else
-                            log.error(log_prefix, text.unpack_fail, name, tostring(v))
-                        end
-                    end
-                    postfunc(list)
-                end
+local function do_make_poll(interval, dname, unitid, fc, addr, number, tags, postfunc)
+--    local p = pack(fc, addr, number)
+--    local log_prefix = string.format("%s(%d): %d, %d(%d)", dname, unitid, fc, addr, number)
+--    local poll = function()
+--        local ok, ret = cli:request(u, t.read)
+--        assert(ok, strfmt("%s:%s", text.req_fail, ret))
+--        local uid = ret[1]
+--        assert(uid==u, strfmt("%s:%s:%s", text.invalid_unit, u, uid))
+--        local fc = ret[2]
+--        assert(fc==t.fc, strfmt("%s:%s:%s", text.invalid_fc, t.fc, fc))
+--        local data = ret[3]
+--        assert(type(data)=="table", strfmt("%s:%s", text.exception, data))
+--        local n = #data
+--        assert(n==t.number, strfmt("%s:%s:%s", text.invalid_num, t.number, n))
+--
+--        local list = {}
+--        for index, t in pairs(tags) do
+--            local ok, v = pcall(t.unpack, index, data)
+--            if ok then
+--                tblins(list, { t.name = v })
+--            else
+--                log.error(log_prefix, text.unpack_fail, name, tostring(v))
+--            end
+--        end
+--        postfunc(list)
+--
+--        if running then
+--            skynet.timeout(interval, poll)
+--        end
+--    end
+--    return poll
+end
+
+local function make_poll()
+--    local dev = {}
+--    for tname, tconf in pairs(dconf.tags) do
+--        local tfc = tconf.fc
+--        if not dev[tfc] then
+--            dev[tfc] = {}
+--        end
+--        local fc = dev[tfc]
+--
+--        local poll_i = poll_interval(dconf, tconf)
+--        if not fc[poll_i] then
+--            fc[poll_i] = {}
+--        end
+--        local p = fc[poll_i]
+--
+--        local poll_f = post_function(dname, dconf, tconf)
+--        if not p[poll_f] then
+--            p[poll_f] = {}
+--        end
+--        local pf = p[poll_f]
+--
+--        local validate_tag(dconf.le, tname, tconf)
+--
+--    end
+end
+
+local function validate_tag(name, tag)
+    if type(name) ~= "string" or type(tag) ~= "table" or
+        not math.tointeger(tag.addr) or
+        (tag.mode ~= "ts" and tag.mode ~= "attr" and tag.mode ~= "ctrl") or
+        (tag.le ~= nil and type(tag.le) ~= "boolean") or
+        (tag.poll ~= nil and not math.tointeger(tag.poll)) then
+        error(text.invalid_tag_conf)
+    end
+end
+
+local fc_map = {
+    [5] = 1,
+    [15] = 1,
+    [6] = 3,
+    [16] = 3
+}
+
+local function validate_tags(tags, dle, tle)
+    for name, t in pairs(tags) do
+        validate_tag(name, t)
+        if t.mode == "ts" or t.mode == "attr" then
+            local le
+            if t.le == nil then
+                le = dle
             else
-                log.error(log_prefix, text.invalid_resp, "unitid", tostring(uid))
+                le = t.le
             end
+            t.unpack = mdata.unpack(t.fc, t.dt, t.number, tle, le, t.bit)
+            t.read = cli_pack(t.fc, t.addr, t.number)
         else
-            log.error(log_prefix, text.poll_fail, ret)
-        end
-        if running then
-            skynet.timeout(interval, poll)
+            t.wfc = t.fc
+            t.fc = assert(fc_map[t.fc], text.invalid_tag_conf)
+            if t.le == nil then
+                le = dle
+            else
+                le = t.le
+            end
+            t.unpack = mdata.unpack(t.fc, t.dt, t.number, tle, le, t.bit)
+            local pack = mdata.pack(t.wfc, t.dt, t.number, tle, le, t.bit)
+            t.read = cli_pack(t.fc, t.addr, t.number)
+            t.write = function(val)
+                local v = pack(val)
+                return cli_pack(t.wfc, t.addr, v)
+            end
         end
     end
-    return poll
 end
 
-local function validate_tag(dle, name, tag)
-    local f
-    if tag.le ~= nil then
-        f = mdata.unpack(tag.fc, tag.t, tag.count, tag.le)
-    local function unpack(data)
+local function validate_device(name, dev)
+    if type(name) ~= "string" or type(dev) ~= "table" or
+        not math.tointeger(dev.unitid) or dev.unitid < MODBUS_SLAVE_MIN or
+        dev.unitid > MODBUS_SLAVE_MAX or
+        not math.tointeger(dev.attr_poll) or not math.tointeger(dev.ts_poll) or
+        type(dev.le) ~= "boolean" then
+        error(text.invalid_device_conf)
     end
 end
 
-local function validate_devices(d)
-    local polls = {}
-    for dname, dconf in pairs(d) do
-        local dev = {}
-        for tname, tconf in pairs(dconf.tags) do
-            local tfc = tconf.fc
-            if not dev[tfc] then
-                dev[tfc] = {}
-            end
-            local fc = dev[tfc]
-
-            local poll_i = poll_interval(dconf, tconf)
-            if not fc[poll_i] then
-                fc[poll_i] = {}
-            end
-            local p = fc[poll_i]
-
-            local poll_f = post_function(dname, dconf, tconf)
-            if not p[poll_f] then
-                p[poll_f] = {}
-            end
-            local pf = p[poll_f]
-
-            local validate_tag(dconf.le, tname, tconf)
-
-        end
+local function validate_devices(d, tle)
+    for name, dev in pairs(d) do
+        validate_device(name, dev)
+        validate_tags(dev.tags, dev.le, tle)
     end
-    return polls
+end
+
+local function unregdev()
+    for name, dev in pairs(devlist) do
+        api.unreg_dev(name)
+    end
+    devlist = {}
 end
 
 local function regdev(d)
-    for name, conf in pairs(d) do
-        local desc = string.format("unitid(%d)", conf.unit_id)
+    devlist = {}
+    for name, dev in pairs(d) do
+        local desc = string.format("unitid(%d)", dev.unitid)
         api.reg_dev(name, desc)
-        tblins(devlist, name)
+        if dev.batch then
+            api.batch_size(name, dev.batch)
+        end
+        devlist[name] = dev
     end
 end
 
-local function config_devices(d)
-    local ok, polls = pcall(validate_devices, d)
-    if ok and next(polls) then
+local function stop()
+    if running then
+        running = false
+        unregdev()
+        skynet.sleep(max_poll)
+    end
+end
+
+local function config_devices(d, tle)
+    local ok, err = pcall(validate_devices, d, tle)
+    if ok then
         stop()
         -- wait for mqtt up
         skynet.sleep(500)
         regdev(d)
         running = true
-        math.randomseed(skynet.time())
-        for _, f in pairs(polls) do
-            f()
-            skynet.sleep(math.random(100, 500))
-        end
+       -- math.randomseed(skynet.time())
+       -- for _, f in pairs(polls) do
+       --     f()
+       --     skynet.sleep(math.random(100, 500))
+       -- end
+       return ok
     else
-        log.error(text.conf_device_fail, polls)
+        return ok, err
     end
 end
 
@@ -276,20 +362,20 @@ local function config_transport(t)
             arg.le = t.le
             arg.timeout = t.timeout
             cli = client.new_rtu(arg)
-            pack = mpdu.pack(t.le)
+            cli_pack = mpdu.pack(t.le)
         elseif mode == 'rtu_tcp' then
             arg = t.tcp
             arg.ascii = t.ascii
             arg.le = t.le
             arg.timeout = t.timeout
             cli = client.new_rtu_tcp(arg)
-            pack = mpdu.pack(t.le)
+            cli_pack = mpdu.pack(t.le)
         elseif mode == 'tcp' then
             arg = t.tcp
             arg.le = t.le
             arg.timeout = t.timeout
             cli = client.new_tcp(arg)
-            pack = mpdu.pack(t.le)
+            cli_pack = mpdu.pack(t.le)
         end
     end
 end
@@ -300,6 +386,13 @@ function on_conf(conf)
     end
     config_transport(conf.transport)
     if cli then
-        config_devices(conf.devices)
+        return config_devices(conf.devices, conf.transport.le)
+    else
+        return false, text.conf_fail
     end
+end
+
+function on_exit()
+    stop()
+    cli.channel:close()
 end

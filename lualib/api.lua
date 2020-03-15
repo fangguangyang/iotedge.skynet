@@ -147,7 +147,7 @@ local function filter_cov(dev, data)
     end
     return data
 end
-function api.cov_post(dev, data)
+function api.post_cov(dev, data)
     if appname and devlist[dev] and
         type(data) == "table" and next(data) then
         data = filter_cov(dev, data)
@@ -157,7 +157,7 @@ function api.cov_post(dev, data)
     end
 end
 
-local function batch(dev, data)
+function api.post_batch(dev, data)
     if appname and devlist[dev] and
         type(data) == "table" and next(data) then
         local p = api.pack_data(data)
@@ -170,7 +170,7 @@ local function batch(dev, data)
     end
 end
 
-function api.batch_post(dev, size)
+function api.batch_size(dev, size)
     if type(size) == "number" and size <= 200 and devlist[dev] then
         devlist[dev].size = size
         return batch

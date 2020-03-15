@@ -23,6 +23,7 @@ function on_conf(conf)
         f:close()
     end
     f = io.open(conf.file, "a")
+    return true
 end
 
 function on_exit()

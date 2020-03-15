@@ -30,10 +30,12 @@ setmetatable(command, { __index = function(t, cmd)
     local f
     if cmd == "conf" then
         if type(_ENV.on_conf) == "function" then
-            f = _ENV.on_conf
+            f = function(conf)
+                skynet.ret(skynet.pack(_ENV.on_conf(conf)))
+            end
         else
             f = function()
-                log.error(text.no_conf_handler)
+                skynet.ret(skynet.pack(false, text.no_conf_handler))
             end
         end
     elseif cmd == "data" then
@@ -68,7 +70,7 @@ setmetatable(command, { __index = function(t, cmd)
         end
     else
         f = function()
-            skynet.ret(skynet.pack(text.unknown_cmd))
+            skynet.ret(skynet.pack(false, text.unknown_cmd))
         end
     end
     t[cmd] = f

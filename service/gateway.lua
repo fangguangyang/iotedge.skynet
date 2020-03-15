@@ -154,7 +154,7 @@ setmetatable(command, { __index = function(t, dev)
                     if cmdlist[cmd] then
                         local ok, ret, err = pcall(skynet.call, d.addr, "lua", cmd, dev, arg)
                         if ok then
-                            if err then
+                            if err ~= nil then
                                 skynet.ret(skynet.pack(ret, err))
                             else
                                 skynet.ret(skynet.pack(ret))

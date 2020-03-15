@@ -317,8 +317,7 @@ local function load_app(id, tpl, conf)
         return false, text.load_fail
     end
 
-    skynet.send(addr, "lua", "conf", conf)
-
+    local ok, err = skynet.call(addr, "lua", "conf", conf)
     applist[id] = {
         addr = addr,
         load_time = api.datetime(),
@@ -330,7 +329,11 @@ local function load_app(id, tpl, conf)
         id = name,
         counter = 0
     }
-    log.error(text.load_suc, name)
+    if ok then
+        log.error(text.load_suc, name)
+    else
+        log.error(text.conf_fail, name, err)
+    end
     return true
 end
 
@@ -419,9 +422,13 @@ local function do_configure(arg, save)
         for _, app in pairs(apps) do
             local id, full_conf = next(app)
             local a = applist[id]
-            skynet.send(a.addr, "lua", "conf", full_conf)
-            a.conf = full_conf
-            update_app(id, a.tpl, full_conf)
+            local ok, err = skynet.call(a.addr, "lua", "conf", full_conf)
+            if ok then
+                a.conf = full_conf
+                update_app(id, a.tpl, full_conf)
+            else
+                return ok, err
+            end
         end
     end
     return true
