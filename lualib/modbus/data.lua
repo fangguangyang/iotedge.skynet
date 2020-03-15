@@ -64,55 +64,37 @@ function data.pack(fc, dt, num, tle, le, bit)
                 return val
             end
         end
-    elseif dt == "string" then
+    else
         assert(fc == 6 or fc == 16, err.invalid_fc)
-        local fmt_p = 'z'
+        local fmt_p, t
+        if dt == "string" then
+            t = "string"
+            fmt_p = 'z'
+        else
+            t = "number"
+            fmt_p = assert(fmt_map[dt][num], err.invalid_datatype)
+            if le then
+                fmt_p = '<'..fmt_p
+            else
+                fmt_p = '>'..fmt_p
+            end
+        end
         local fmt_u
         if tle then
             fmt_u = '<'..strrep('I2', num)
         else
             fmt_u = '>'..strrep('I2', num)
         end
-        local n = num*2
         if fc == 6 then
             assert(num == 1, err.invalid_num)
             return function(val)
-                assert(type(val) == "string" and #val < n, err.invalid_val)
+                assert(type(val) == t,  err.invalid_val)
                 local v = strunpack(fmt_u, strpack(fmt_p, val))
                 return v
             end
         else
             return function(val)
-                assert(type(val) == "string" and #val < n, err.invalid_val)
-                local t = { strunpack(fmt_u, strpack(fmt_p, val)) }
-                tblremove(t, num+1)
-                return t
-            end
-        end
-    else
-        assert(fc == 6 or fc == 16, err.invalid_fc)
-        local fmt_p = assert(fmt_map[dt][num], err.invalid_datatype)
-        if le then
-            fmt_p = '<'..fmt_p
-        else
-            fmt_p = '>'..fmt_p
-        end
-        local fmt_u
-        if tle then
-            fmt_u = '<'..strrep('I2', num)
-        else
-            fmt_u = '>'..strrep('I2', num)
-        end
-        if fc == 6 then
-            assert(num == 1, err.invalid_num)
-            return function(val)
-                assert(type(val) == "number", err.invalid_val)
-                local t = strunpack(fmt_u, strpack(fmt_p, val))
-                return t
-            end
-        else
-            return function(val)
-                assert(type(val) == "number", err.invalid_val)
+                assert(type(val) == t, err.invalid_val)
                 local t = { strunpack(fmt_u, strpack(fmt_p, val)) }
                 tblremove(t, num+1)
                 return t
@@ -140,9 +122,20 @@ function data.unpack(fc, dt, num, tle, le, bit)
                 return data[index]
             end
         end
-    elseif dt == "string" then
+    else
         assert(fc == 3 or fc == 4, err.invalid_fc)
-        local fmt_u = 'z'
+        local fmt_u
+        if dt == "string" then
+            fmt_u = 'z'
+        else
+            fmt_u = assert(fmt_map[dt][num], err.invalid_datatype)
+            if le then
+                fmt_u = '<'..fmt_u
+            else
+                fmt_u = '>'..fmt_u
+            end
+        end
+
         local fmt_p
         if tle then
             fmt_p = '<'..strrep('I2', num)
@@ -153,32 +146,6 @@ function data.unpack(fc, dt, num, tle, le, bit)
         return function(index, data)
             local v = strunpack(fmt_u, strpack(fmt_p, tblunpack(data, index, index+n)))
             return v
-        end
-    else
-        assert(fc == 3 or fc == 4, err.invalid_fc)
-        local fmt_u = assert(fmt_map[dt][num], err.invalid_datatype)
-        if le then
-            fmt_u = '<'..fmt_u
-        else
-            fmt_u = '>'..fmt_u
-        end
-        local fmt_p
-        if tle then
-            fmt_p = '<'..strrep('I2', num)
-        else
-            fmt_p = '>'..strrep('I2', num)
-        end
-        local n = num-1
-        if le then
-            return function(index, data)
-                local v = strunpack(fmt_u, strpack(fmt_p, tblunpack(data, index, index+n)))
-                return v
-            end
-        else
-            return function(index, data)
-                local v = strunpack(fmt_u, strpack(fmt_p, tblunpack(data, index, index+n)))
-                return v
-            end
         end
     end
 end
