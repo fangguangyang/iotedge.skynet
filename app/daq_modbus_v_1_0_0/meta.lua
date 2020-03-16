@@ -18,59 +18,59 @@ conf = {
             parity = 'none', -- 'odd', 'even'
             stopbits = 1,
             rtscts = false -- hardware flow control
+            r_timeout = 300,
+            b_timeout = 300
         }
     },
     devices = {
         a = {
-            attr_poll = 1000,
+            attr_poll = 2000,
             ts_poll = 1000,
             unitid = 1,
             le = false,
+            batch = 20,
             tags = {
-                a1 = {
-                    mode = "ts",
+                t1 = {
+                    mode = 'ts'
                     fc = 3,
                     addr = 0,
                     number = 2,
-                    dt = "int"
+                    dt = 'uint'
+                    poll = 2000,
+                    cov = true,
+                    gain = 1,
+                    offset = 0
                 },
-                a2 = {
-                    mode = "ctrl",
-                    fc = 16,
+                t2 = {
+                    mode = 'attr'
+                    fc = 3,
                     addr = 2,
                     number = 2,
-                    dt = "int",
-                    le = true
+                    dt = 'float',
+                    le = true,
+                    gain = 2,
+                    offset = 0
                 },
-                a3 = {
-                    mode = "ctrl",
-                    fc = 16,
-                    addr = 4,
-                    number = 3,
-                    dt = "string",
-                    le = true
+                t3 = {
+                    mode = 'attr'
+                    fc = 3,
+                    addr = 5,
+                    number = 2,
+                    dt = 'float'
                 },
-                a4 = {
-                    mode = "ctrl",
-                    fc = 5,
+                t4 = {
+                    mode = 'ts'
+                    fc = 4,
+                    addr = 0,
+                    number = 2,
+                    dt = 'int'
+                },
+                t5 = {
+                    mode = 'ts'
+                    fc = 1,
                     addr = 0,
                     number = 1,
-                    dt = "boolean"
-                },
-                a5 = {
-                    mode = "ctrl",
-                    fc = 6,
-                    addr = 7,
-                    number = 1,
-                    dt = "boolean",
-                    bit = 3
-                },
-                a6 = {
-                    mode = "ctrl",
-                    fc = 16,
-                    addr = 8,
-                    number = 2,
-                    dt = "float"
+                    dt = 'boolean'
                 }
             }
         }

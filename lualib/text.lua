@@ -11,13 +11,17 @@ local text = {
         unknown_cmd = "unknown command",
         no_conf_handler = "no conf handler",
         no_data_handler = "no data handler",
-        conf_fail = "configure failed",
-        conf_device_fail = "configure devices failed",
+        pack_fail = "pack failed",
+    },
+    modbus = {
         pack_fail = "pack failed",
         unpack_fail = "unpack failed",
-        req_fail = "fetch data failed",
         invalid_device_conf = "invalid device configuration",
         invalid_tag_conf = "invalid tag configuration",
+        invalid_fc_conf = "invalid function code configuration",
+        invalid_addr_conf = "invalid address configuration",
+        not_online = "device not online",
+        req_fail = "fetch data failed",
         invalid_arg = "invalid argument",
         invalid_dev = "invalid device",
         invalid_tag = "invalid tag",
@@ -27,8 +31,7 @@ local text = {
         invalid_fc = "invalid function code of response",
         invalid_addr = "invalid addr of response",
         invalid_write, "invalid write",
-        exception = "exception raised",
-        not_online = "device not online"
+        exception = "exception raised"
     },
     sysmgr = {
         unknown_cmd = "unknown command",

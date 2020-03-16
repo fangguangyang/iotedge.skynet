@@ -1,6 +1,6 @@
 local skynet = require "skynet"
 local log = require "log"
-local text = require("text").app
+local text = require("text").modbus
 local api = require "api"
 local client = require "modbus.client"
 local mpdu = require "modbus.pdu"
@@ -11,12 +11,19 @@ local strfmt = string.format
 
 local MODBUS_SLAVE_MIN = 1
 local MODBUS_SLAVE_MAX = 247
+local MODBUS_ADDR_MIN = 0x0000
+local MODBUS_ADDR_MAX = 0x270E
+local MODBUS_MAX_READ_BITS = 2000
+local MODBUS_MAX_READ_REGISTERS = 125
 
 local cli
 local cli_pack
 local registered = false
 local running = false
 local max_poll = 100 * 60 -- 1 min
+local poll_min = 10 -- ms
+local poll_max = 1000 * 60 * 60 -- 1 hour
+local batch_max = 200
 local devlist = {}
 
 local cmd_desc = {
@@ -133,94 +140,193 @@ function write(dev, arg)
     end
 end
 
-local function poll_interval(dconf, tconf)
-    if tconf.poll then
-        return tconf.poll
-    else
-        return dconf[tconf.mode.."_poll"]
+local function post(dname, index, interval)
+    local attr = {}
+    local ts = {}
+    for i, t in pairs(index) do
+        local tag = t.tag
+        if tag.cov then
+            api.post_cov(dname, { [tag.name] = t.val })
+        else
+            if tag.poll_cum + interval > tag.poll then
+                tag.poll_cum = 0
+                if tag.mode == "ts" then
+                    tblins(ts, { [tag.name] = t.val })
+                else
+                    tblins(attr, { [tag.name] = t.val })
+                end
+            else
+                tag.poll_cum = tag.poll_cum + interval
+            end
+        end
+    end
+    if next(ts) then
+        api.post_data(dname, ts)
+    end
+    if next(attr) then
+        api.post_attr(dname, attr)
     end
 end
 
-local function post_function(dname, dconf, tconf)
-    if tconf.cov then
-        return api.cov_post
+local function make_poll(dname, unitid, fc, start, number, interval, index)
+    local p = cli_pack(fc, start, number)
+    local log_prefix = string.format("%s(%d): %d, %d(%d)", dname, unitid, fc, start, number)
+    local timeout = interval // 10
+    local poll = function()
+        local ok, ret = cli:request(unitid, p)
+        assert(ok, strfmt("%s %s:%s", log_prefix, text.req_fail, ret))
+        local uid = ret[1]
+        assert(uid==unitid, strfmt("%s %s:%s:%s", log_prefix, text.invalid_unit, unitid, uid))
+        local c = ret[2]
+        assert(c==fc, strfmt("%s %s:%s:%s", log_prefix, text.invalid_fc, fc, c))
+        local data = ret[3]
+        assert(type(data)=="table", strfmt("%s %s:%s", log_prefix, text.exception, data))
+        if fc == 3 or fc == 4 then
+            local n = #data
+            assert(n==number, strfmt("%s %s:%s:%s", log_prefix, text.invalid_num, number, n))
+        end
+        for i, t in pairs(index) do
+            local v = t.tag.unpack(i, data)
+            index[i].val = v
+        end
+        post(dname, index, interval)
+        if running then
+            skynet.timeout(timeout, function()
+                local ok, err = pcall(poll)
+                if not ok then
+                    log.error(err)
+                end
+            end)
+        end
     end
-    if tconf.mode == "attr" then
-        return api.post_attr
-    end
-    if dconf.batch then
-        return api.batch_post(dname, dconf.batch)
-    else
-        return api.post_data
-    end
+    return poll
 end
 
-local function do_make_poll(interval, dname, unitid, fc, addr, number, tags, postfunc)
---    local p = pack(fc, addr, number)
---    local log_prefix = string.format("%s(%d): %d, %d(%d)", dname, unitid, fc, addr, number)
---    local poll = function()
---        local ok, ret = cli:request(u, t.read)
---        assert(ok, strfmt("%s:%s", text.req_fail, ret))
---        local uid = ret[1]
---        assert(uid==u, strfmt("%s:%s:%s", text.invalid_unit, u, uid))
---        local fc = ret[2]
---        assert(fc==t.fc, strfmt("%s:%s:%s", text.invalid_fc, t.fc, fc))
---        local data = ret[3]
---        assert(type(data)=="table", strfmt("%s:%s", text.exception, data))
---        local n = #data
---        assert(n==t.number, strfmt("%s:%s:%s", text.invalid_num, t.number, n))
---
---        local list = {}
---        for index, t in pairs(tags) do
---            local ok, v = pcall(t.unpack, index, data)
---            if ok then
---                tblins(list, { t.name = v })
---            else
---                log.error(log_prefix, text.unpack_fail, name, tostring(v))
---            end
---        end
---        postfunc(list)
---
---        if running then
---            skynet.timeout(interval, poll)
---        end
---    end
---    return poll
-end
+local maxnumber = {
+    [1] = MODBUS_MAX_READ_BITS,
+    [2] = MODBUS_MAX_READ_BITS,
+    [3] = MODBUS_MAX_READ_REGISTERS,
+    [4] = MODBUS_MAX_READ_REGISTERS
+}
 
-local function make_poll()
---    local dev = {}
---    for tname, tconf in pairs(dconf.tags) do
---        local tfc = tconf.fc
---        if not dev[tfc] then
---            dev[tfc] = {}
---        end
---        local fc = dev[tfc]
---
---        local poll_i = poll_interval(dconf, tconf)
---        if not fc[poll_i] then
---            fc[poll_i] = {}
---        end
---        local p = fc[poll_i]
---
---        local poll_f = post_function(dname, dconf, tconf)
---        if not p[poll_f] then
---            p[poll_f] = {}
---        end
---        local pf = p[poll_f]
---
---        local validate_tag(dconf.le, tname, tconf)
---
---    end
+local function make_polls(dname, unitid, tags, addrlist, polls)
+    for fc, addrinfo in pairs(addrlist) do
+        local maxnumber = maxnumber(fc)
+        local list = addrinfo.list
+        local start = false
+        local index
+        local number
+        local interval
+        local function make()
+            local poll = make_poll(dname, unitid, fc, start, number, interval, index)
+            tblins(polls, poll)
+        end
+        local function init(addr, tag)
+            start = addr
+            number = tag.number
+            interval = tag.poll
+            index = { [1] = { tag = tag } }
+        end
+        for a = addrinfo.min, addrinfo.max do
+            local t = tags[list[a]]
+            if t then
+                if not start then
+                    init(a, t)
+                else
+                    if number + t.number <= maxnumber then
+                        index[number+1] = { tag = t }
+                        number = number + t.number
+                        if t.poll < interval then
+                            interval = t.poll
+                        end
+                    else
+                        make()
+                        init(a, t)
+                    end
+                end
+            else
+                if list[a] == nil then
+                    if start then
+                        make()
+                        start = false
+                    end
+                end
+            end
+        end
+        make()
+    end
 end
 
 local function validate_tag(name, tag)
     if type(name) ~= "string" or type(tag) ~= "table" or
         not math.tointeger(tag.addr) or
         (tag.mode ~= "ts" and tag.mode ~= "attr" and tag.mode ~= "ctrl") or
+        (tag.cov ~= nil and type(tag.cov) ~= "boolean") or
         (tag.le ~= nil and type(tag.le) ~= "boolean") or
-        (tag.poll ~= nil and not math.tointeger(tag.poll)) then
+        (tag.poll ~= nil and not math.tointeger(tag.poll)) or
+        (tag.poll and tag.poll < poll_min or tag.poll > poll_max) then
         error(text.invalid_tag_conf)
+    end
+end
+
+local function validate_poll_addr(tname, fc, addr, number, addrlist)
+    -- number to be validated in modbus.data
+    assert(addr >= MODBUS_ADDR_MIN and addr <= MODBUS_ADDR_MAX, text.invalid_addr_conf)
+    if not addrlist[fc] then
+        addrlist[fc] = { list = {} }
+    end
+    local addrs = addrlist[fc].list
+    local min = MODBUS_ADDR_MAX
+    local max = MODBUS_ADDR_MIN
+    for a = addr, addr+number-1 do
+        assert(addrs[a] == nil, ext.invalid_addr_conf)
+        if a == addr then
+            addrs[a] = tname
+            if a < min then
+                addrlist[fc].min = a
+            end
+            if a > max then
+                addrlist[fc].max = a
+            end
+        else
+            addrs[a] = true
+        end
+    end
+end
+
+local function validate_write_addr(tname, fc, addr, number, addrlist)
+    -- number to be validated in modbus.data
+    assert(addr >= MODBUS_ADDR_MIN and addr <= MODBUS_ADDR_MAX, text.invalid_addr_conf)
+    if not addrlist[fc] then
+        addrlist[fc] = {}
+    end
+    local addrs = addrlist[fc]
+    for a = addr, addr+number-1 do
+        assert(addrs[a] == nil, ext.invalid_addr_conf)
+        if a == addr then
+            addrs[a] = tname
+        else
+            addrs[a] = true
+        end
+    end
+end
+
+local function validate_addr(polllist, writelist, tags)
+    for fc, list in pairs(writelist) do
+        if polllist[fc] then
+            local poll = polllist[fc].list
+            for a, name in pairs(list) do
+                if type(poll[a]) == "string" then
+                    assert(type(name) == "string", text.invalid_addr_conf)
+                    local pt = tags[poll[a]]
+                    local wt = tags[name]
+                    assert(pt.number == wt.number and
+                        pt.dt == wt.dt and
+                        pt.le == wt.le and
+                        pt.bit == wt.bit, text.invalid_addr_conf)
+                end
+            end
+        end
     end
 end
 
@@ -231,28 +337,36 @@ local fc_map = {
     [16] = 3
 }
 
-local function validate_tags(tags, dle, tle)
+local function validate_tags(tags, dle, ts_poll, attr_poll, tle)
+    local polllist = {}
+    local writelist = {}
     for name, t in pairs(tags) do
         validate_tag(name, t)
         if t.mode == "ts" or t.mode == "attr" then
-            local le
+            validate_poll_addr(name, t.fc, t.addr, t.number, polllist)
             if t.le == nil then
-                le = dle
-            else
-                le = t.le
+                t.le = dle
             end
-            t.unpack = mdata.unpack(t.fc, t.dt, t.number, tle, le, t.bit)
+            if t.poll == nil then
+                if t.mode == "ts" then
+                    t.poll = ts_poll
+                else
+                    t.poll = attr_poll
+                end
+            end
+            t.unpack = mdata.unpack(t.fc, t.dt, t.number, tle, t.le, t.bit)
             t.read = cli_pack(t.fc, t.addr, t.number)
+            t.name = name
+            t.poll_cum = 0
         else
             t.wfc = t.fc
-            t.fc = assert(fc_map[t.fc], text.invalid_tag_conf)
+            t.fc = assert(fc_map[t.fc], text.invalid_fc_conf)
+            validate_write_addr(name, t.fc, t.addr, t.number, writelist)
             if t.le == nil then
-                le = dle
-            else
-                le = t.le
+                t.le = dle
             end
-            t.unpack = mdata.unpack(t.fc, t.dt, t.number, tle, le, t.bit)
-            local pack = mdata.pack(t.wfc, t.dt, t.number, tle, le, t.bit)
+            t.unpack = mdata.unpack(t.fc, t.dt, t.number, tle, t.le, t.bit)
+            local pack = mdata.pack(t.wfc, t.dt, t.number, tle, t.le, t.bit)
             t.read = cli_pack(t.fc, t.addr, t.number)
             t.write = function(val)
                 local v = pack(val)
@@ -260,23 +374,36 @@ local function validate_tags(tags, dle, tle)
             end
         end
     end
+    validate_addr(polllist, writelist, tags)
+    return polllist
 end
 
 local function validate_device(name, dev)
     if type(name) ~= "string" or type(dev) ~= "table" or
-        not math.tointeger(dev.unitid) or dev.unitid < MODBUS_SLAVE_MIN or
+        not math.tointeger(dev.unitid) or
+        dev.unitid < MODBUS_SLAVE_MIN or
         dev.unitid > MODBUS_SLAVE_MAX or
-        not math.tointeger(dev.attr_poll) or not math.tointeger(dev.ts_poll) or
-        type(dev.le) ~= "boolean" then
+        not math.tointeger(dev.attr_poll) or
+        dev.attr_poll < poll_min or
+        dev.attr_poll > poll_max or
+        not math.tointeger(dev.ts_poll) or
+        dev.ts_poll < poll_min or
+        dev.ts_poll > poll_max or
+        type(dev.le) ~= "boolean" or
+        (dev.batch ~= nil and not math.tointeger(dev.batch) or
+        (dev.batch and dev.batch > batch_max)) then
         error(text.invalid_device_conf)
     end
 end
 
 local function validate_devices(d, tle)
+    local polls = {}
     for name, dev in pairs(d) do
         validate_device(name, dev)
-        validate_tags(dev.tags, dev.le, tle)
+        local addrlist = validate_tags(dev.tags, dev.le, dev.ts_poll, dev.attr_poll, tle)
+        make_polls(name, dev.unitid, dev.tags, addrlist, polls)
     end
+    return polls
 end
 
 local function unregdev()
@@ -307,19 +434,23 @@ local function stop()
 end
 
 local function config_devices(d, tle)
-    local ok, err = pcall(validate_devices, d, tle)
+    local ok, polls = pcall(validate_devices, d, tle)
     if ok then
         stop()
         -- wait for mqtt up
         skynet.sleep(500)
         regdev(d)
         running = true
-       -- math.randomseed(skynet.time())
-       -- for _, f in pairs(polls) do
-       --     f()
-       --     skynet.sleep(math.random(100, 500))
-       -- end
-       return ok
+        math.randomseed(skynet.time())
+
+        for _, p in ipairs(polls) do
+            local ok, err = pcall(p)
+            if not ok then
+                log.error(err)
+            end
+            skynet.sleep(math.random(100, 500))
+        end
+        return ok
     else
         return ok, err
     end

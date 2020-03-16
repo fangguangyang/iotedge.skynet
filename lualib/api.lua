@@ -51,7 +51,8 @@ function api.reg_dev(name, desc)
             not devlist[name] then
             devlist[name] = {
                 buffer = {},
-                cov = {}
+                cov = {},
+                size = 10
             }
             local dev = dev_name(name, appname)
             send(gateway_addr, "reg_dev", dev, desc)
@@ -110,7 +111,7 @@ function api.data_value(data)
     return data.values
 end
 
-local function raw_post(dev, data)
+local function do_post(dev, data)
     local d = dev_name(dev, appname)
     for _, targets in pairs(r_table) do
         for t, _ in pairs(targets) do
@@ -118,17 +119,6 @@ local function raw_post(dev, data)
         end
     end
 end
-local function do_post(dev, data)
-    local p = api.pack_data(data)
-    raw_post(dev, p)
-end
-function api.post_data(dev, data)
-    if appname and devlist[dev] and
-        type(data) == "table" and next(data) then
-        do_post(dev, data)
-    end
-end
-
 local function filter_cov(dev, data)
     local c = devlist[dev].cov
     if next(c) then
@@ -152,19 +142,19 @@ function api.post_cov(dev, data)
         type(data) == "table" and next(data) then
         data = filter_cov(dev, data)
         if next(data) then
-            do_post(dev, data)
+            local p = api.pack_data(data)
+            do_post(dev, p)
         end
     end
 end
-
-function api.post_batch(dev, data)
+function api.post_data(dev, data)
     if appname and devlist[dev] and
         type(data) == "table" and next(data) then
         local p = api.pack_data(data)
         local b = devlist[dev].buffer
         table.move(p, 1, #p, #b+1, b)
         if #b >= devlist[dev].size then
-            raw_post(dev, b)
+            do_post(dev, b)
             devlist[dev].buffer = {}
         end
     end
@@ -173,9 +163,6 @@ end
 function api.batch_size(dev, size)
     if type(size) == "number" and size <= 200 and devlist[dev] then
         devlist[dev].size = size
-        return batch
-    else
-        return false
     end
 end
 
