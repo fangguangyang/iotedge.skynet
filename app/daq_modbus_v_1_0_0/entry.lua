@@ -20,7 +20,7 @@ local cli
 local cli_pack
 local registered = false
 local running = false
-local max_poll = 100 * 60 -- 1 min
+local max_wait = 100 * 60 -- 1 min
 local poll_min = 10 -- ms
 local poll_max = 1000 * 60 * 60 -- 1 hour
 local batch_max = 200
@@ -141,15 +141,21 @@ function write(dev, arg)
 end
 
 local function post(dname, index, interval)
-    local attr = {}
     local ts = {}
+    local attr = {}
     for i, t in pairs(index) do
         local tag = t.tag
         if tag.cov then
+            if tag.gain then
+                t.val = t.val * t.gain + t.offset
+            end
             api.post_cov(dname, { [tag.name] = t.val })
         else
-            if tag.poll_cum + interval > tag.poll then
+            if tag.poll_cum + interval >= tag.poll then
                 tag.poll_cum = 0
+                if tag.gain then
+                    t.val = t.val * t.gain + t.offset
+                end
                 if tag.mode == "ts" then
                     tblins(ts, { [tag.name] = t.val })
                 else
@@ -340,6 +346,7 @@ local fc_map = {
 local function validate_tags(tags, dle, ts_poll, attr_poll, tle)
     local polllist = {}
     local writelist = {}
+    local max_poll = attr_poll > ts_poll and attr_poll or ts_poll
     for name, t in pairs(tags) do
         validate_tag(name, t)
         if t.mode == "ts" or t.mode == "attr" then
@@ -353,6 +360,8 @@ local function validate_tags(tags, dle, ts_poll, attr_poll, tle)
                 else
                     t.poll = attr_poll
                 end
+            elseif ts.poll > max_poll then
+                max_poll = ts.poll
             end
             t.unpack = mdata.unpack(t.fc, t.dt, t.number, tle, t.le, t.bit)
             t.read = cli_pack(t.fc, t.addr, t.number)
@@ -375,7 +384,7 @@ local function validate_tags(tags, dle, ts_poll, attr_poll, tle)
         end
     end
     validate_addr(polllist, writelist, tags)
-    return polllist
+    return polllist, max_poll
 end
 
 local function validate_device(name, dev)
@@ -398,12 +407,16 @@ end
 
 local function validate_devices(d, tle)
     local polls = {}
+    local max = 0
     for name, dev in pairs(d) do
         validate_device(name, dev)
-        local addrlist = validate_tags(dev.tags, dev.le, dev.ts_poll, dev.attr_poll, tle)
+        local addrlist, max_poll = validate_tags(dev.tags, dev.le, dev.ts_poll, dev.attr_poll, tle)
+        if max_poll > max then
+            max = max_poll
+        end
         make_polls(name, dev.unitid, dev.tags, addrlist, polls)
     end
-    return polls
+    return polls, max
 end
 
 local function unregdev()
@@ -429,20 +442,23 @@ local function stop()
     if running then
         running = false
         unregdev()
-        skynet.sleep(max_poll)
+        skynet.sleep(max_wait)
     end
 end
 
 local function config_devices(d, tle)
-    local ok, polls = pcall(validate_devices, d, tle)
+    local ok, polls, max = pcall(validate_devices, d, tle)
     if ok then
         stop()
+        max_wait = max // 10
         -- wait for mqtt up
         skynet.sleep(500)
         regdev(d)
         running = true
         math.randomseed(skynet.time())
 
+        log.error(strfmt("%s: total(%d), max interval(%d s)",
+                text.poll_start, #polls, max // 1000))
         for _, p in ipairs(polls) do
             local ok, err = pcall(p)
             if not ok then

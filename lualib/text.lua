@@ -15,7 +15,7 @@ local text = {
     },
     modbus = {
         pack_fail = "pack failed",
-        unpack_fail = "unpack failed",
+        poll_start = "poll started",
         invalid_device_conf = "invalid device configuration",
         invalid_tag_conf = "invalid tag configuration",
         invalid_fc_conf = "invalid function code configuration",
