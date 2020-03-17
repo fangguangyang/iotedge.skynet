@@ -203,7 +203,7 @@ end
 
 local function validate_existing_app(arg)
     assert(type(arg) == "table", text.invalid_arg)
-    local name, conf = assert(next(arg), text.invalid_arg)
+    local name, conf = next(arg)
     assert(type(conf) == "table", text.invalid_arg)
     local tpl, id = validate_app_name(name)
     return { [id] = clone(tpllist[tpl], conf) }
@@ -211,7 +211,7 @@ end
 
 local function validate_app(arg)
     assert(type(arg) == "table", text.invalid_arg)
-    local tpl, conf = assert(next(arg), text.invalid_arg)
+    local tpl, conf = next(arg)
     assert(type(tpl) == "string" and
         tpl:match("^[%l%d_]+_v_[%d_]+$") and
         type(conf) == "table", text.invalid_arg)
@@ -356,6 +356,7 @@ local function do_full_configure(arg, save)
             return ok, err
         end
     end
+    return true
 end
 
 local function do_configure(arg)

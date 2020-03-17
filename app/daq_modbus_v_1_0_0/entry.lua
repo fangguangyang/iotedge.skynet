@@ -87,8 +87,8 @@ function read(dev, tag)
             local t = devlist[dev].tags[tag]
 
             -- all tag can be read, no check here
-            local ok, err = cli:request(u, t.read)
-            assert(ok, strfmt("%s:%s", text.req_fail, err))
+            local ok, ret = cli:request(u, t.read)
+            assert(ok, strfmt("%s:%s", text.req_fail, ret))
 
             local uid = ret[1]
             assert(uid==u, strfmt("%s:%s:%s", text.invalid_unit, u, uid))
@@ -128,8 +128,8 @@ function write(dev, arg)
             local ok = pcall(t.write, val)
             assert(ok, text.pack_fail)
 
-            local ok, err = cli:request(u, p)
-            assert(ok, strfmt("%s:%s", text.req_fail, err))
+            local ok, ret = cli:request(u, p)
+            assert(ok, strfmt("%s:%s", text.req_fail, ret))
             local uid = ret[1]
             assert(uid==u, strfmt("%s:%s:%s", text.invalid_unit, u, uid))
             local fc = ret[2]
@@ -187,9 +187,9 @@ local function make_poll(dname, unitid, fc, start, number, interval, index)
     local p = cli_pack(fc, start, number)
     local log_prefix = string.format("%s(%d): %d, %d(%d)", dname, unitid, fc, start, number)
     local timeout = interval // 10
-    local poll = function()
-        local ok, err = cli:request(unitid, p)
-        assert(ok, strfmt("%s %s:%s", log_prefix, text.req_fail, err))
+    local function poll()
+        local ok, ret = cli:request(unitid, p)
+        assert(ok, strfmt("%s %s:%s", log_prefix, text.req_fail, ret))
         local uid = ret[1]
         assert(uid==unitid, strfmt("%s %s:%s:%s", log_prefix, text.invalid_unit, unitid, uid))
         local c = ret[2]
@@ -226,7 +226,7 @@ local maxnumber = {
 
 local function make_polls(dname, unitid, addrlist, polls)
     for fc, addrinfo in pairs(addrlist) do
-        local maxnumber = maxnumber(fc)
+        local maxnumber = maxnumber[fc]
         local list = addrinfo.list
         local start = false
         local index
@@ -337,6 +337,9 @@ local fc_map = {
 local tag_schema = {
     fc = function(v)
         return v==1 or v==2 or v==3 or v==4 or v==5 or v==15 or v==6 or v==16
+    end,
+    bit = function(v)
+        return v==nil or (math.tointeger(v) and v>=1 and v<=16)
     end,
     addr = function(v)
         return math.tointeger(v) and v>=MODBUS_ADDR_MIN and v<=MODBUS_ADDR_MAX
@@ -496,7 +499,7 @@ local function config_devices(d, tle)
             end
             skynet.sleep(math.random(100, 200))
         end
-        log.error(strfmt("%s: total(%d), max interval(%d s)",
+        log.error(strfmt("%s: total(%d), max interval(%ds)",
                 text.poll_start, #polls, max // 1000))
         return ok
     else
@@ -522,7 +525,7 @@ local t_schema = {
             return type(v)=="string" and v:match("^[%w%.%-]+$")
         end,
         port = function(v)
-            return math.tointeger(v) and v>0 and v<0xFF
+            return math.tointeger(v) and v>0 and v<0xFFFF
         end
     },
     rtu = {
