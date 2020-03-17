@@ -40,7 +40,7 @@ function on_conf()
     skynet.timeout(500, function()
         api.reg_dev(host, "iotedge host")
         api.batch_size(host, 10)
-        post = api.post_batch
+        post = api.post_data
     end)
     return true
 end

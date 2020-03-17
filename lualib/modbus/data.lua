@@ -40,8 +40,9 @@ local fc_w = { [5]=true, [6]=true, [15]=true, [16]=true }
 local data = {}
 function data.pack(fc, dt, num, tle, le, bit)
     assert(fc_w[fc], err.invalid_fc)
-    assert(math.tointeger(num), err.invalid_num)
-    assert(num > 0 and num <= MODBUS_MAX_WRITE_REGISTERS, err.invalid_num)
+    assert(math.tointeger(num) and
+        num > 0 and num <= MODBUS_MAX_WRITE_REGISTERS,
+        err.invalid_num)
     assert(type(tle)=="boolean" and type(le)=="boolean", err.invalid_le)
 
     if dt == "boolean" then
@@ -105,8 +106,9 @@ end
 
 function data.unpack(fc, dt, num, tle, le, bit)
     assert(fc_r[fc], err.invalid_fc)
-    assert(math.tointeger(num), err.invalid_num)
-    assert(num > 0 and num <= MODBUS_MAX_READ_REGISTERS, err.invalid_num)
+    assert(math.tointeger(num) and
+        num > 0 and num <= MODBUS_MAX_READ_REGISTERS,
+        err.invalid_num)
     assert(type(tle)=="boolean" and type(le)=="boolean", err.invalid_le)
 
     if dt == "boolean" then

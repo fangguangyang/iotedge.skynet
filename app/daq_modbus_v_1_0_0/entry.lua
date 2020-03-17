@@ -81,18 +81,24 @@ end
 function read(dev, tag)
     if cli then
         return pcall(function()
-            local u = assert(devlist[dev].unitid, text.invalid_dev)
-            local t = assert(devlist[dev].tags[tag], text.invalid_tag)
+            assert(devlist[dev], text.invalid_dev)
+            assert(devlist[dev].tags[tag], text.invalid_tag)
+            local u = devlist[dev].unitid
+            local t = devlist[dev].tags[tag]
 
             -- all tag can be read, no check here
-            local ok, ret = cli:request(u, t.read)
-            assert(ok, strfmt("%s:%s", text.req_fail, ret))
+            local ok, err = cli:request(u, t.read)
+            assert(ok, strfmt("%s:%s", text.req_fail, err))
+
             local uid = ret[1]
             assert(uid==u, strfmt("%s:%s:%s", text.invalid_unit, u, uid))
+
             local fc = ret[2]
             assert(fc==t.fc, strfmt("%s:%s:%s", text.invalid_fc, t.fc, fc))
+
             local data = ret[3]
             assert(type(data)=="table", strfmt("%s:%s", text.exception, data))
+
             if t.fc == 3 or t.fc == 4 then
                 local n = #data
                 assert(n==t.number, strfmt("%s:%s:%s", text.invalid_num, t.number, n))
@@ -107,20 +113,23 @@ end
 function write(dev, arg)
     if cli then
         return pcall(function()
-            local u = assert(devlist[dev].unitid, text.invalid_dev)
-            assert(type(arg) == "table", text.invalid_arg)
-            local tag = arg[1]
-            assert(type(tag) == "string", text.invalid_arg)
-            local val = arg[2]
-            assert(type(val) == "number" or
-                type(val) == "boolean" or
-                type(val) == "string", text.invalid_arg)
-            local t = assert(devlist[dev].tags[tag], text.invalid_tag)
-            local w = assert(t.write, text.read_only)
-            local p = assert(w(val), strfmt("%s", text.pack_fail))
+            assert(devlist[dev], text.invalid_dev)
+            assert(type(arg) == "table" and
+                type(arg[1]) == "string" and
+                (type(arg[2]) == "number" or
+                 type(arg[2]) == "boolean" or
+                 type(arg[2]) == "string"), text.invalid_arg)
+            assert(devlist[dev].tags[arg[1]], text.invalid_tag)
+            local u = devlist[dev].unitid
+            local t = devlist[dev].tags[arg[1]]
 
-            local ok, ret = cli:request(u, p)
-            assert(ok, strfmt("%s:%s", text.req_fail, ret))
+            assert(t.write, text.read_only)
+            local val = arg[2]
+            local ok = pcall(t.write, val)
+            assert(ok, text.pack_fail)
+
+            local ok, err = cli:request(u, p)
+            assert(ok, strfmt("%s:%s", text.req_fail, err))
             local uid = ret[1]
             assert(uid==u, strfmt("%s:%s:%s", text.invalid_unit, u, uid))
             local fc = ret[2]
@@ -179,8 +188,8 @@ local function make_poll(dname, unitid, fc, start, number, interval, index)
     local log_prefix = string.format("%s(%d): %d, %d(%d)", dname, unitid, fc, start, number)
     local timeout = interval // 10
     local poll = function()
-        local ok, ret = cli:request(unitid, p)
-        assert(ok, strfmt("%s %s:%s", log_prefix, text.req_fail, ret))
+        local ok, err = cli:request(unitid, p)
+        assert(ok, strfmt("%s %s:%s", log_prefix, text.req_fail, err))
         local uid = ret[1]
         assert(uid==unitid, strfmt("%s %s:%s:%s", log_prefix, text.invalid_unit, unitid, uid))
         local c = ret[2]
@@ -326,6 +335,9 @@ local fc_map = {
 }
 
 local tag_schema = {
+    fc = function(v)
+        return v==1 or v==2 or v==3 or v==4 or v==5 or v==15 or v==6 or v==16
+    end,
     addr = function(v)
         return math.tointeger(v) and v>=MODBUS_ADDR_MIN and v<=MODBUS_ADDR_MAX
     end,
@@ -470,7 +482,6 @@ end
 local function config_devices(d, tle)
     local ok, polls, max = pcall(validate_devices, d, tle)
     if ok then
-        stop()
         math.randomseed(skynet.time())
         max_wait = max // 10
         -- wait for mqtt up
@@ -478,7 +489,7 @@ local function config_devices(d, tle)
         regdev(d)
         running = true
 
-        for _, p in ipairs(polls) do
+        for _, p in pairs(polls) do
             local ok, err = pcall(p)
             if not ok then
                 log.error(err)
@@ -489,7 +500,7 @@ local function config_devices(d, tle)
                 text.poll_start, #polls, max // 1000))
         return ok
     else
-        return ok, err
+        return ok, polls
     end
 end
 
@@ -508,7 +519,7 @@ local t_schema = {
     end,
     tcp = {
         host = function(v)
-            return v:match("^[%w%.%-]+$")
+            return type(v)=="string" and v:match("^[%w%.%-]+$")
         end,
         port = function(v)
             return math.tointeger(v) and v>0 and v<0xFF
