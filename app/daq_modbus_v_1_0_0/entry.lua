@@ -159,6 +159,7 @@ local function post(dname, index, interval)
                 t.val = t.val * t.gain + t.offset
             end
             api.post_cov(dname, { [t.name] = t.val })
+            log.debug(strfmt("%s:%s:%s cov posted", dname, t.name, tostring(t.val)))
         else
             if t.poll_cum + interval >= t.poll then
                 t.poll_cum = 0
@@ -167,8 +168,10 @@ local function post(dname, index, interval)
                 end
                 if t.mode == "ts" then
                     tblins(ts, { [t.name] = t.val })
+                    log.debug(strfmt("%s:%s:%s ts posted", dname, t.name, tostring(t.val)))
                 else
                     tblins(attr, { [t.name] = t.val })
+                    log.debug(strfmt("%s:%s:%s attr posted", dname, t.name, tostring(t.val)))
                 end
             else
                 t.poll_cum = t.poll_cum + interval
@@ -482,23 +485,26 @@ local function stop()
     end
 end
 
+local function start(d, polls)
+    running = true
+    -- wait for mqtt up
+    skynet.sleep(500)
+    regdev(d)
+    math.randomseed(skynet.time())
+    for _, p in pairs(polls) do
+        local ok, err = pcall(p)
+        if not ok then
+            log.error(err)
+        end
+        skynet.sleep(math.random(100, 200))
+    end
+end
+
 local function config_devices(d, tle)
     local ok, polls, max = pcall(validate_devices, d, tle)
     if ok then
-        math.randomseed(skynet.time())
         max_wait = max // 10
-        -- wait for mqtt up
-        skynet.sleep(500)
-        regdev(d)
-        running = true
-
-        for _, p in pairs(polls) do
-            local ok, err = pcall(p)
-            if not ok then
-                log.error(err)
-            end
-            skynet.sleep(math.random(100, 200))
-        end
+        skynet.fork(start, d, polls)
         log.error(strfmt("%s: total(%d), max interval(%ds)",
                 text.poll_start, #polls, max // 1000))
         return ok
