@@ -350,6 +350,9 @@ local tag_schema = {
     number = function(v)
         return math.tointeger(v) and v>0
     end,
+    dt = function(v)
+        return v=="int" or v=="uint" or v=="string" or v=="float" or v=="boolean"
+    end,
     mode = function(v)
         return v=="ts" or v=="attr" or v=="ctrl"
     end,

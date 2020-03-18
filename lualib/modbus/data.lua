@@ -73,6 +73,7 @@ function data.pack(fc, dt, num, tle, le, bit)
             fmt_p = 'z'
         else
             t = "number"
+            assert(fmt_map[dt], err.invalid_datatype)
             fmt_p = assert(fmt_map[dt][num], err.invalid_datatype)
             if le then
                 fmt_p = '<'..fmt_p
@@ -130,6 +131,7 @@ function data.unpack(fc, dt, num, tle, le, bit)
         if dt == "string" then
             fmt_u = 'z'
         else
+            assert(fmt_map[dt], err.invalid_datatype)
             fmt_u = assert(fmt_map[dt][num], err.invalid_datatype)
             if le then
                 fmt_u = '<'..fmt_u
