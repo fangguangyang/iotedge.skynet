@@ -1,6 +1,7 @@
 local skynet = require "skynet.manager"
 local cluster = require "skynet.cluster"
 local crypt = require "skynet.crypt"
+local api = require "api"
 local md5 =	require	"md5"
 local lfs = require "lfs"
 local dump = require "utils.dump"
@@ -179,12 +180,17 @@ end
 local userpass
 local command = {}
 
-function command.auth(username, password)
+function command.auth(arg)
+    local username = arg[1]
+    local password = arg[2]
     return md5.sumhexa(username) == cfg.auth.username and
     crypt.hmac_sha1(md5.sumhexa(password), cfg.auth.salt) == userpass
 end
 
-function command.update_app(id, tpl, conf)
+function command.update_app(arg)
+    local id = arg[1]
+    local tpl = arg[2]
+    local conf = arg[3]
     if conf then
         local f = app_cfg(id, tpl)
         local ok, err = save_cfg(f, "conf", conf)
@@ -202,6 +208,9 @@ function command.update_app(id, tpl, conf)
             os.remove(bak_file(f))
             cfg.apps[id] = nil
             log.error(text.config_removed, f)
+            return true
+        else
+            return false
         end
     end
 end
@@ -220,6 +229,7 @@ function command.update_pipes(list)
         os.remove(bak_file(pipe_cfg))
         cfg.pipes = {}
         log.error(text.config_removed, pipe_cfg)
+        return true
     end
 end
 
@@ -227,7 +237,7 @@ local function total_conf()
     return { repo = cfg.repo, apps = cfg.apps, pipes = cfg.pipes }
 end
 
-function command.get(key)
+function command.conf_get(key)
     if key == "total" then
         return total_conf()
     else
@@ -284,7 +294,9 @@ function command.install_tpl(name)
     end)
 end
 
-function command.set_repo(uri, auth)
+function command.update_repo(arg)
+    local uri = arg[1]
+    local auth = arg[2]
     local ok = http.get(uri, auth)
     if ok then
         local conf = { uri = uri, auth = auth }
@@ -366,6 +378,7 @@ function command.upgrade(version)
 
             local current_conf = skynet.unpack(skynet.pack(total_conf()))
             skynet.call(cfg.appmgr, "lua", "clean")
+            skynet.send(cfg.store, "lua", "stop")
             skynet.send(cfg.gateway_console, "lua", "stop")
             skynet.send(cfg.gateway_ws, "lua", "stop")
 
@@ -404,6 +417,21 @@ local function init_auth()
     userpass = crypt.hmac_sha1(cfg.auth.password, cfg.auth.salt)
 end
 
+local cmd_desc = {
+    update_pipes = true,
+    update_app = true,
+    update_repo = true,
+    install_tpl = true,
+    conf_get = true,
+    upgrade = true,
+    auth = true
+}
+local function reg_cmd()
+    for k, v in pairs(cmd_desc) do
+        api.reg_cmd(k, v, true)
+    end
+end
+
 local function launch()
     skynet.sleep(1) -- wait for logger
     load_all()
@@ -412,25 +440,32 @@ local function launch()
 
     local s = skynet.self()
     local g = skynet.uniqueservice("gateway", s)
+    skynet.name(".gateway", g)
     cluster.register(gateway_global, g)
     cluster.open(cluster_reload(cluster, cluster_port()))
     log.error("Gateway started")
 
-    cfg.gateway_console = skynet.uniqueservice("gateway_console", 30000, g)
+    api.init()
+    api.reg_dev("internal", true)
+    reg_cmd()
+
+    cfg.store = skynet.uniqueservice("store")
+    skynet.name(".store", cfg.store)
+    log.error("Store started")
+
+    cfg.gateway_console = skynet.uniqueservice("gateway_console", 30000)
     log.error("Console started")
 
-    cfg.gateway_ws = skynet.uniqueservice("gateway_ws", 30001, g)
+    cfg.gateway_ws = skynet.uniqueservice("gateway_ws", 30001)
     log.error("Websocket started")
 
     if cfg.gateway_mqtt then
         local c = cfg.gateway_mqtt.tpl
-        cfg.gateway_mqtt_addr = skynet.uniqueservice(c, g)
+        cfg.gateway_mqtt_addr = skynet.uniqueservice(c)
         log.error("MQTT started", c)
-    else
-        cfg.gateway_mqtt_addr = -1
     end
 
-    cfg.appmgr = skynet.uniqueservice(true, "appmgr", s, g, cfg.gateway_ws, cfg.gateway_mqtt_addr)
+    cfg.appmgr = skynet.uniqueservice(true, "appmgr", cfg.gateway_ws, cfg.gateway_mqtt_addr)
     skynet.monitor("appmgr", true)
     log.error("Monitor started")
 
@@ -439,10 +474,10 @@ local function launch()
 end
 
 skynet.start(function()
-    skynet.dispatch("lua", function(_, _, cmd, ...)
+    skynet.dispatch("lua", function(_, _, cmd, dev, arg)
         local f = command[cmd]
         if f then
-            skynet.ret(skynet.pack(f(...)))
+            skynet.ret(skynet.pack(f(arg)))
         else
             skynet.ret(skynet.pack(false, text.unknown_cmd))
         end

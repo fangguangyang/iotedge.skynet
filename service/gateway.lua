@@ -18,7 +18,7 @@ local internal = {
 local function help()
     local ret = {}
     for k, v in pairs(devlist) do
-        if not v.appname then
+        if k ~= "internal" and not v.appname then
             ret[k] = {}
             ret[k].devices = v.sublist
             local cmd = {}
@@ -35,14 +35,6 @@ end
 
 local function invalidate_cache(name)
     command[name] = nil
-end
-
-function command.conf_get(addr, k)
-    skynet.ret(skynet.pack(skynet.call(sysmgr_addr, "lua", "get", k)))
-end
-
-function command.auth(addr, user, pass)
-    skynet.ret(skynet.pack(skynet.call(sysmgr_addr, "lua", "auth", user, pass)))
 end
 
 function command.reg_cmd(addr, name, desc)
@@ -182,7 +174,7 @@ setmetatable(command, { __index = function(t, dev)
 end})
 
 skynet.start(function()
-    local conf = skynet.call(sysmgr_addr, "lua", "get", "gateway")
+    local conf = skynet.call(sysmgr_addr, "lua", "conf_get", "internal", "gateway")
     if conf then
         skynet.dispatch("lua", function(_, addr, cmd, ...)
             command[cmd](addr, ...)

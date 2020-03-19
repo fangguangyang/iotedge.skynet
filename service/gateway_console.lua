@@ -1,10 +1,11 @@
 local skynet = require "skynet"
 local socket = require "skynet.socket"
+local api = require "api"
 local text = require("text").console
 local regex = require("text").regex
 
 local ip = "127.0.0.1"
-local port, gateway_addr = ...
+local port = ...
 local connections = 0
 local max = 1
 local fds = {}
@@ -58,14 +59,14 @@ local function split_cmdline(cmdline)
 end
 
 local function docmd(cmdline)
-    if cmdline == "help" then
-        return skynet.call(gateway_addr, "lua", cmdline)
+    if cmdline:match("^help") then
+        return api.external_request(cmdline)
     elseif cmdline == "quit" then
         return cmdline
     else
         local dev, cmd, arg = split_cmdline(cmdline)
         if dev then
-            return skynet.call(gateway_addr, "lua", dev, cmd, arg)
+            return api.external_request(dev, cmd, arg)
         else
             return text.tip
         end
@@ -117,11 +118,12 @@ local function auth(fd)
     local u = socket.readline(fd, "\r\n")
     socket.write(fd, text.password)
     local p = socket.readline(fd, "\r\n")
-    return skynet.call(gateway_addr, "lua", "auth", u, p)
+    return api.internal_request("auth", {u, p})
 end
 
 skynet.start(function()
     local running = true
+    api.init()
     local listen_socket = socket.listen(ip, port)
     socket.start(listen_socket, function(fd, addr)
         if running then

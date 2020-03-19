@@ -1,12 +1,13 @@
 local skynet = require "skynet"
 local socket = require "skynet.socket"
+local api = require "api"
 local websocket = require "http.websocket"
 
 local seri = require "seri"
 local log = require "log"
 local text = require("text").console
 
-local port, gateway_addr = ...
+local port = ...
 
 local protocol = "ws"
 local connected = false
@@ -82,7 +83,7 @@ function handle.message(fd, msg)
     if not authed then
         local user, pass = decode_auth(msg)
         if user then
-            authed = skynet.call(gateway_addr, "lua", "auth", user, pass)
+            authed = api.internal_request("auth", {user, pass})
         end
         auth_respond(fd, authed)
         if authed then
@@ -96,7 +97,7 @@ function handle.message(fd, msg)
         end
     else
         if msg:match("^help") then
-            local h = skynet.call(gateway_addr, "lua", msg)
+            local h = api.external_request(msg)
             local payload = seri.pack(h)
             if payload then
                 websocket.write(fd, payload)
@@ -104,7 +105,7 @@ function handle.message(fd, msg)
         else
             local dev, cmd, arg = decode_request(msg)
             if dev then
-                local ok, ret = skynet.call(gateway_addr, "lua", dev, cmd, arg)
+                local ok, ret = api.external_request(dev, cmd, arg)
                 if ret then
                     do_respond(fd, dev, cmd, { ok, ret })
                 else
@@ -129,7 +130,7 @@ end
 
 skynet.start(function()
     local running = true
-
+    api.init()
     seri.init(seri.JSON)
     local listen_socket = socket.listen("0.0.0.0", port)
 

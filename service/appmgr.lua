@@ -8,7 +8,7 @@ local interval = 500 -- 5 seconds
 local limit = 4 -- 15 seconds
 local locked = true
 
-local sysmgr_addr, gateway_addr, wsapp_addr, mqttapp_addr = ...
+local wsapp_addr, mqttapp_addr = ...
 local wsappid = "ws"
 local mqttappid = "mqtt"
 
@@ -74,7 +74,7 @@ end
 local function update_app(id, app)
     invalidate_info()
     local tpl, conf = next(app)
-    skynet.call(sysmgr_addr, "lua", "update_app", id, tpl, conf)
+    api.internal_request("update_app", { id, tpl, conf })
 end
 
 local function remove_app(id)
@@ -82,7 +82,7 @@ local function remove_app(id)
     local tpl = applist[id].tpl
     applist[id] = nil
     invalidate_info()
-    skynet.call(sysmgr_addr, "lua", "update_app", id, tpl, false)
+    api.internal_request("update_app", { id, tpl, false })
 end
 
 local function update_pipes()
@@ -93,7 +93,7 @@ local function update_pipes()
         list[k].auto = (v.start_time ~= false)
         list[k].apps = v.apps
     end
-    skynet.call(sysmgr_addr, "lua", "update_pipes", list)
+    api.internal_request("update_pipes", list)
 end
 
 local function validate_repo(repo)
@@ -116,7 +116,7 @@ local function validate_repo(repo)
             end
         end
         assert(auth, text.invalid_repo)
-        local ok, err = skynet.call(sysmgr_addr, "lua", "set_repo", repo.uri, auth)
+        local ok, err = api.internal_request("update_repo", { repo.uri, auth })
         if ok then
             sysinfo.sys.repo = repo.uri
         else
@@ -172,7 +172,7 @@ end
 local function install_tpl(tpl)
     if not tpllist[tpl] then
         validate_repo()
-        local ok, ret = skynet.call(sysmgr_addr, "lua", "install_tpl", tpl)
+        local ok, ret = api.internal_request("install_tpl", tpl)
         if ok then
             tpllist[tpl] = ret
         else
@@ -251,7 +251,7 @@ local function load_app(id, app)
     applist[id] = {}
     local tpl, conf = next(app)
     local name = make_name(tpl, id)
-    local ok, addr = pcall(skynet.newservice, "appcell", tpl, name, gateway_addr, mqttapp_addr)
+    local ok, addr = pcall(skynet.newservice, "appcell", tpl, name, mqttapp_addr)
     if not ok then
         applist[id] = nil
         log.error(text.load_fail, tpl, addr)
@@ -383,7 +383,7 @@ local function load_sysapp()
         conf = 30001,
         route = {}
     }
-    if tonumber(mqttapp_addr) ~= -1 then
+    if mqttapp_addr then
         applist[mqttappid] = {
             addr = mqttapp_addr,
             load_time = now,
@@ -395,7 +395,6 @@ end
 
 local cmd_desc = {
     mqttapp = true,
-    clean = true,
     configure = "System configure: {}",
     upgrade = "System upgrade: <string>",
     info = "Show system info",
@@ -413,20 +412,18 @@ local function reg_cmd()
     end
 end
 
-local function conf_get(k)
-    return skynet.call(sysmgr_addr, "lua", "get", k)
-end
-
 local function load_all()
-    sysinfo.sys = conf_get("sys")
+    api.init(mqttapp_addr)
+
+    sysinfo.sys = api.internal_request("conf_get", "sys")
     sysinfo.sys.cluster = nil
     sysinfo.sys.up = api.datetime(skynet.starttime())
     sysinfo.sys.repo = false
 
     load_sysapp()
-    tpllist = conf_get("tpls")
+    tpllist = api.internal_request("conf_get", "tpls")
 
-    local total = conf_get("total")
+    local total = api.internal_request("conf_get", "total")
     local ok, err = pcall(validate_conf, total)
     if ok then
         ok, err = do_full_configure(total, false)
@@ -437,7 +434,6 @@ local function load_all()
         log.error(text.conf_fail, err)
     end
 
-    api.init(gateway_addr, mqttapp_addr)
     api.reg_dev("sys", true)
     reg_cmd()
     locked = false
@@ -499,7 +495,7 @@ function command.upgrade(version)
         return ok, err
     end
     locked = true
-    local ok, err = skynet.call(sysmgr_addr, "lua", "upgrade", version)
+    local ok, err = api.internal_request("upgrade", version)
     --locked = false
     return ok, err
 end

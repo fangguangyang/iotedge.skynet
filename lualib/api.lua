@@ -10,11 +10,10 @@ end
 
 local api = {}
 
-local gateway_addr = nil
+local gateway_addr = ".gateway"
 local gateway_mqtt_addr = nil
-function api.init(gateway, mqtt)
-    gateway_addr = gateway
-    if tonumber(mqtt) ~= -1 then
+function api.init(mqtt)
+    if mqtt then
         gateway_mqtt_addr = mqtt
     end
 end
@@ -91,6 +90,18 @@ function api.post_attr(dev, attr)
     if appname and devlist[dev] and gateway_mqtt_addr then
         send(gateway_mqtt_addr, "post", "attributes", dev_name(dev, appname), attr)
     end
+end
+
+function api.external_request(...)
+    return call(gateway_addr, ...)
+end
+
+function api.sys_request(...)
+    return call(gateway_addr, "sys", ...)
+end
+
+function api.internal_request(...)
+    return call(gateway_addr, "internal", ...)
 end
 
 ------------------------------------------

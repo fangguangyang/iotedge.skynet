@@ -1,10 +1,9 @@
 local skynet = require "skynet"
+local api = require "api"
 local log = require "log"
 local seri = require "seri"
 local mqtt = require "mqtt"
 local text = require("text").mqtt
-
-local gateway_addr = ...
 
 local client
 local running = true
@@ -106,7 +105,7 @@ local function handle_connect(connack, cli)
     log.error(log_prefix, "connected")
     ensure_subscribe(cli, rpc_topic, rpc_qos)
 
-    skynet.call(gateway_addr, "lua", "sys", "mqttapp", { uri = sys_uri, id = sys_name })
+    api.sys_request("mqttapp", { uri = sys_uri, id = sys_name })
 
     local check_timeout = keepalive_timeout+100
     local function ping()
@@ -209,7 +208,7 @@ local function handle_request(msg, cli)
         skynet.fork(function()
             local dev, cmd, arg, session = decode_request(msg)
             if dev then
-                local ok, ret = skynet.call(gateway_addr, "lua", dev, cmd, arg)
+                local ok, ret = api.external_request(dev, cmd, arg)
                 if ret then
                     do_respond(cli, dev, { ok, ret }, session)
                 else
@@ -309,7 +308,8 @@ function command.post(k, ...)
 end
 
 local function init()
-    local conf = skynet.call(gateway_addr, "lua", "conf_get", "gateway_mqtt")
+    api.init()
+    local conf = api.internal_request("conf_get", "gateway_mqtt")
     if not conf then
         log.error(text.no_conf)
     else

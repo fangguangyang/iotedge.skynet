@@ -60,13 +60,13 @@ local function validate_reg_val(val)
 end
 local function validate_bit_table(t)
     assert(#t > 0 and #t <= MODBUS_MAX_WRITE_BITS, err.invalid_number)
-    for _, v in ipairs(t) do
+    for _, v in pairs(t) do
         validate_bit_val(v)
     end
 end
 local function validate_reg_table(t)
     assert(#t > 0 and #t <= MODBUS_MAX_WRITE_REGISTERS, err.invalid_number)
-    for _, v in ipairs(t) do
+    for _, v in pairs(t) do
         validate_reg_val(v)
     end
 end
