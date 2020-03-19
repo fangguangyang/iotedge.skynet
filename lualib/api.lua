@@ -81,15 +81,11 @@ function api.unreg_dev(name)
     end
 end
 
-local function init_mqtt(mqtt)
-    if mqtt then
-        gateway_mqtt_addr = mqtt
-    end
-end
-
 function api.app_init(name, mqtt)
     if name then
-        init_mqtt(mqtt)
+        if mqtt then
+            gateway_mqtt_addr = mqtt
+        end
         api.reg_dev(name, true)
     else
         appname = "mqtt"

@@ -10,10 +10,13 @@ local command = {}
 function command.stop(addr)
     running = false
 end
-function command.connected(addr, name)
+
+function command.online(addr, name)
 end
-function command.disconnected(addr, name)
+
+function command.offline(addr)
 end
+
 function command.post(addr, dev, data)
 end
 
