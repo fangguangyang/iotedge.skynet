@@ -24,7 +24,6 @@ local running = false
 local max_wait = 100 * 60 -- 1 min
 local poll_min = 10 -- ms
 local poll_max = 1000 * 60 * 60 -- 1 hour
-local batch_max = 200
 local devlist = {}
 
 local cmd_desc = {
@@ -426,6 +425,14 @@ local d_schema = {
     unitid = function(v)
         return math.tointeger(v) and v>=MODBUS_SLAVE_MIN and v<=MODBUS_SLAVE_MAX
     end,
+    store = function(v)
+        if type(v)=="table" then
+        elseif v==nil then
+            return true
+        else
+            return false
+        end
+    end,
     attr_poll = function(v)
         return math.tointeger(v) and v>=poll_min and v<=poll_max
     end,
@@ -436,7 +443,7 @@ local d_schema = {
         return type(v)=="boolean"
     end,
     batch = function(v)
-        return v==nil or (math.tointeger(v) and v<=batch_max)
+        return v==nil or (math.tointeger(v) and v<=api.batch_max)
     end
 }
 
@@ -467,8 +474,11 @@ end
 local function regdev(d)
     devlist = {}
     for name, dev in pairs(d) do
-        local desc = string.format("unitid(%d)", dev.unitid)
-        api.reg_dev(name, desc)
+        local conf = {
+            desc = string.format("unitid(%d)", dev.unitid),
+            conf = dev.store
+        }
+        api.reg_dev(name, conf)
         if dev.batch then
             api.batch_size(name, dev.batch)
         end

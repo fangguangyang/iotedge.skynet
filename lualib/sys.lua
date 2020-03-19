@@ -19,7 +19,17 @@ local function execute(cmd)
     end
 end
 
-local sys = {}
+local sys = {
+    app_root = "app",
+    db_root = "db",
+    run_root = "run",
+    repo_cfg = "run/repo",
+    pipe_cfg = "run/pipe",
+    meta_lua = "meta",
+    entry_lua = "entry",
+    gateway_global = "iotedge-gateway"
+}
+
 function sys.resolve(hostname)
     if hostname:match("^[%.%d]+$") then
         return hostname

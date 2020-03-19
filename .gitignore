@@ -1,12 +1,11 @@
 /skynet/
 /bin/
 /release/
-/config.lua
 /run/
-/log*
+/db/
 /log*/
-
-/memo
+/config.lua
+/log*
 
 *.a
 *.o

@@ -1,4 +1,5 @@
 local skynet = require "skynet"
+local api = require "api"
 local log = require "log"
 local text = require("text").gateway
 
@@ -59,7 +60,7 @@ end
 
 function command.reg_dev(addr, name, desc)
     if type(name) ~= "string" or
-        (type(desc) ~= "boolean" and type(desc) ~= "string") then
+        (type(desc) ~= "boolean" and type(desc) ~= "table") then
         log.error(text.invalid_dev)
         return
     end
@@ -91,7 +92,8 @@ function command.reg_dev(addr, name, desc)
             addr = addr,
             appname = app.name
         }
-        app.sublist[name] = desc
+        app.sublist[name] = desc.desc
+        api.dev_online(name, desc.conf)
         invalidate_cache(name)
     end
     log.error(text.dev_registered, name)

@@ -10,13 +10,13 @@ local log = require "log"
 local sys = require "sys"
 local text = require("text").sysmgr
 
-local app_root = "./app"
-local run_root = "./run"
-local repo_cfg = run_root.."/repo"
-local pipe_cfg = run_root.."/pipe"
-local meta_lua = "meta"
-local entry_lua = "entry"
-local gateway_global = "iotedge-gateway"
+local app_root = sys.app_root
+local run_root = sys.run_root
+local repo_cfg = sys.repo_cfg
+local pipe_cfg = sys.pipe_cfg
+local meta_lua = sys.meta_lua
+local entry_lua = sys.entry_lua
+local gateway_global = sys.gateway_global
 
 local function backup(from, to)
     local f = io.open(from)
@@ -166,8 +166,8 @@ local cfg = {
 }
 
 local function load_all()
-    pcall(lfs.mkdir, run_root)
     pcall(lfs.mkdir, app_root)
+    pcall(lfs.mkdir, run_root)
 
     load_cfg(skynet.getenv("cfg"), cfg)
     load_cfg(repo_cfg, cfg)

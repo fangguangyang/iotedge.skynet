@@ -13,6 +13,11 @@ local text = {
         no_data_handler = "no data handler",
         pack_fail = "pack failed",
     },
+    store = {
+        open_fail = "DB open failed",
+        online = "APP online",
+        offline = "APP offline"
+    },
     modbus = {
         pack_fail = "pack failed",
         poll_start = "poll started",

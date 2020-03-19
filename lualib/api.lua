@@ -14,7 +14,11 @@ local gateway_mqtt_addr
 local appname
 local devlist = {}
 
-local api = {}
+local api = {
+    batch_max = 200,
+    store_ttl_max = 30, -- day
+    store_number_max = 10000
+}
 function api.datetime(time)
     if time then
         return os.date("%Y-%m-%d %H:%M:%S", time)
@@ -41,7 +45,7 @@ function api.reg_dev(name, desc)
     else
         if appname and
             type(name) == "string" and
-            type(desc) == "string" and
+            type(desc) == "table" and
             not devlist[name] then
             devlist[name] = {
                 buffer = {},
@@ -125,7 +129,7 @@ function api.internal_request(...)
 end
 
 function api.store(dev, data)
-    send(store_addr, dev, data)
+    send(store_addr, "data", dev, data)
 end
 
 function api.online()
@@ -134,6 +138,10 @@ end
 
 function api.offline()
     send(store_addr, "offline")
+end
+
+function api.dev_online(dev, conf)
+    send(store_addr, "dev_online", dev, conf)
 end
 
 ------------------------------------------
@@ -207,7 +215,7 @@ function api.post_data(dev, data)
 end
 
 function api.batch_size(dev, size)
-    if type(size) == "number" and size <= 200 and devlist[dev] then
+    if type(size) == "number" and size <= api.batch_max and devlist[dev] then
         devlist[dev].size = size
     end
 end
