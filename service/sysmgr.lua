@@ -426,11 +426,6 @@ local cmd_desc = {
     upgrade = true,
     auth = true
 }
-local function reg_cmd()
-    for k, v in pairs(cmd_desc) do
-        api.reg_cmd(k, v, true)
-    end
-end
 
 local function launch()
     skynet.sleep(1) -- wait for logger
@@ -445,9 +440,7 @@ local function launch()
     cluster.open(cluster_reload(cluster, cluster_port()))
     log.error("Gateway started")
 
-    api.init()
-    api.reg_dev("internal", true)
-    reg_cmd()
+    api.internal_init(cmd_desc)
 
     cfg.store = skynet.uniqueservice("store")
     skynet.name(".store", cfg.store)

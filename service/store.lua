@@ -18,7 +18,6 @@ function command.post(addr, dev, data)
 end
 
 skynet.start(function()
-    api.init()
     skynet.dispatch("lua", function(session, addr, cmd, ...)
         local f = command[cmd]
         if f then

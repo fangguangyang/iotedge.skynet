@@ -308,7 +308,7 @@ function command.post(k, ...)
 end
 
 local function init()
-    api.init()
+    api.app_init()
     local conf = api.internal_request("conf_get", "gateway_mqtt")
     if not conf then
         log.error(text.no_conf)

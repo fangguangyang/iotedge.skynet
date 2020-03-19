@@ -130,7 +130,6 @@ end
 
 skynet.start(function()
     local running = true
-    api.init()
     seri.init(seri.JSON)
     local listen_socket = socket.listen("0.0.0.0", port)
 

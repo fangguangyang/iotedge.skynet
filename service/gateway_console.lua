@@ -123,7 +123,6 @@ end
 
 skynet.start(function()
     local running = true
-    api.init()
     local listen_socket = socket.listen(ip, port)
     socket.start(listen_socket, function(fd, addr)
         if running then

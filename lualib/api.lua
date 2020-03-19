@@ -8,16 +8,13 @@ local function send(addr, ...)
     skynet.send(addr, "lua", ...)
 end
 
-local api = {}
-
 local gateway_addr = ".gateway"
-local gateway_mqtt_addr = nil
-function api.init(mqtt)
-    if mqtt then
-        gateway_mqtt_addr = mqtt
-    end
-end
+local store_addr = ".store"
+local gateway_mqtt_addr
+local appname
+local devlist = {}
 
+local api = {}
 function api.datetime(time)
     if time then
         return os.date("%Y-%m-%d %H:%M:%S", time)
@@ -33,8 +30,6 @@ function api.reg_cmd(name, desc, internal)
     send(gateway_addr, "reg_cmd", name, desc)
 end
 
-local appname
-local devlist = {}
 local function dev_name(name, appname)
     return name.."@"..appname
 end
@@ -86,6 +81,35 @@ function api.unreg_dev(name)
     end
 end
 
+local function init_mqtt(mqtt)
+    if mqtt then
+        gateway_mqtt_addr = mqtt
+    end
+end
+
+function api.app_init(name, mqtt)
+    if name then
+        init_mqtt(mqtt)
+        api.reg_dev(name, true)
+    else
+        appname = "mqtt"
+    end
+end
+
+function api.internal_init(cmd_desc)
+    api.reg_dev("internal", true)
+    for k, v in pairs(cmd_desc) do
+        api.reg_cmd(k, v, true)
+    end
+end
+
+function api.sys_init(cmd_desc)
+    api.reg_dev("sys", true)
+    for k, v in pairs(cmd_desc) do
+        api.reg_cmd(k, v, true)
+    end
+end
+
 function api.post_attr(dev, attr)
     if appname and devlist[dev] and gateway_mqtt_addr then
         send(gateway_mqtt_addr, "post", "attributes", dev_name(dev, appname), attr)
@@ -104,23 +128,20 @@ function api.internal_request(...)
     return call(gateway_addr, "internal", ...)
 end
 
+function api.store(dev, data)
+    send(store_addr, dev, data)
+end
+
+function api.online()
+    send(store_addr, "online", appname)
+end
+
+function api.offline()
+    send(store_addr, "offline")
+end
+
 ------------------------------------------
 local r_table = {}
-function api.pack_data(data)
-    local p = {
-        ts = skynet.time()*1000,
-        values = data
-    }
-    return {p}
-end
-
-function api.ts_value(data)
-    return data.ts
-end
-
-function api.data_value(data)
-    return data.values
-end
 
 local function do_post(dev, data)
     local d = dev_name(dev, appname)
@@ -130,6 +151,7 @@ local function do_post(dev, data)
         end
     end
 end
+
 local function filter_cov(dev, data)
     local c = devlist[dev].cov
     if next(c) then
@@ -148,6 +170,23 @@ local function filter_cov(dev, data)
     end
     return data
 end
+
+function api.pack_data(data)
+    local p = {
+        ts = skynet.time()*1000,
+        values = data
+    }
+    return {p}
+end
+
+function api.ts_value(data)
+    return data.ts
+end
+
+function api.data_value(data)
+    return data.values
+end
+
 function api.post_cov(dev, data)
     if appname and devlist[dev] and
         type(data) == "table" and next(data) then

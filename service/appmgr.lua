@@ -406,14 +406,9 @@ local cmd_desc = {
     pipe_start = "Start a PIPE: <id>",
     pipe_stop = "Stop a PIPE: <id>",
 }
-local function reg_cmd()
-    for k, v in pairs(cmd_desc) do
-        api.reg_cmd(k, v, true)
-    end
-end
 
 local function load_all()
-    api.init(mqttapp_addr)
+    api.sys_init(cmd_desc)
 
     sysinfo.sys = api.internal_request("conf_get", "sys")
     sysinfo.sys.cluster = nil
@@ -434,8 +429,6 @@ local function load_all()
         log.error(text.conf_fail, err)
     end
 
-    api.reg_dev("sys", true)
-    reg_cmd()
     locked = false
 end
 
